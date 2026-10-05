@@ -1,2 +1,1 @@
-// Placeholder for shared application-level TypeScript types
-export {};
+export * from './auth';

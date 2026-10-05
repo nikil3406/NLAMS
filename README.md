@@ -5,8 +5,9 @@ National Land Acquisition Management System (NLAMS) is an enterprise platform de
 ## Current Status
 
 ```text
-Phase 1 — Step 2: Database Foundation ✓
-Phase 1 — Step 1: Project Foundation  ✓
+Phase 1 — Step 3: Authentication Foundation ✓
+Phase 1 — Step 2: Database Foundation       ✓
+Phase 1 — Step 1: Project Foundation        ✓
 ```
 
 ## Stack
@@ -65,7 +66,7 @@ pnpm db:studio
 
 ### Schema
 
-7 Phase 1 tables in `db/schema/`:
+8 Phase 1 tables in `db/schema/`:
 
 | Table | Description |
 |---|---|
@@ -76,6 +77,48 @@ pnpm db:studio
 | `user_roles` | Many-to-many: users → roles (with assignment tracking) |
 | `administrative_units` | Self-referencing hierarchy (Central → State → District) |
 | `user_assignments` | User → Administrative unit assignments |
+| `sessions` | Server-side sessions storing SHA-256 hashed tokens with expiration |
+
+## Phase 1 — Step 3: Authentication Foundation
+
+NLAMS implements a secure, server-side session authentication architecture designed strictly around identity verification (*"Who are you?"*), completely decoupled from authorization and permissions (*"What can you do?"*).
+
+```text
+Browser
+  │  HttpOnly Session Cookie (`nlams_session`)
+  ▼
+Next.js Route Handlers / Server Components
+  │  Reads cookie via `getCurrentUser()` / `requireAuthentication()`
+  ▼
+Authentication Service (`src/services/auth/`)
+  │  Hashes candidate token (SHA-256) & validates session state
+  ▼
+Repositories (`src/repositories/`)
+  │  Drizzle ORM queries
+  ▼
+PostgreSQL (`sessions` + `users` tables)
+```
+
+### Core Authentication Features
+
+- **Password Security:** Passwords hashed with **Argon2id** via `@node-rs/argon2` (OWASP parameters: 64 MiB memory, 3 iterations, 4 parallelism). Plaintext passwords and hashes are never exposed or logged.
+- **Session Architecture:** 32-byte (256-bit) cryptographically random session tokens. Stored in PostgreSQL as **SHA-256 hashes** to protect against database compromise.
+- **Immediate Revocation:** Immediate session invalidation upon logout or user deactivation (`status !== 'ACTIVE'`).
+- **Transport Security:** Session tokens transmitted exclusively via **HttpOnly**, **SameSite=Lax**, **Path=/** cookies. Never stored in `localStorage` or `sessionStorage`.
+- **Timing Attack Mitigation:** Generic `"Invalid email or password"` responses combined with dummy Argon2id verifications on non-existent accounts to eliminate timing side-channels and prevent email enumeration.
+
+### Authentication Endpoints
+
+| Method | Endpoint | Description | Auth Required |
+|---|---|---|---|
+| `POST` | `/api/auth/login` | Authenticate credentials, create server-side session, set HttpOnly cookie | No |
+| `POST` | `/api/auth/logout` | Invalidate active session and clear cookie (idempotent) | Yes (safe if unauth) |
+| `GET` | `/api/auth/me` | Retrieve profile of currently authenticated user | Yes |
+
+### Server-Side Helpers
+
+- `getCurrentUser(request?)`: Returns `SafeUser | null`. Works in both Route Handlers (`NextRequest`) and Server Components (`next/headers`).
+- `requireAuthentication(request?)`: Asserts user is authenticated, throws `AuthenticationError` (401) if not. Serves as the protected route foundation for future modules.
 
 ## Project Structure
 
@@ -154,6 +197,9 @@ The application will be available at `http://localhost:3000`.
 ### Code Quality & Build Verification
 
 ```bash
+# Run automated test suite
+pnpm test
+
 # Run ESLint checks
 pnpm lint
 

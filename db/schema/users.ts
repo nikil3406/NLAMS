@@ -2,6 +2,7 @@ import { pgTable, uuid, varchar, text, timestamp, pgEnum, uniqueIndex } from 'dr
 import { relations } from 'drizzle-orm';
 import { userRoles } from './user-roles';
 import { userAssignments } from './user-assignments';
+import { sessions } from './sessions';
 
 export const userStatusEnum = pgEnum('user_status', ['ACTIVE', 'INACTIVE', 'SUSPENDED']);
 
@@ -25,6 +26,7 @@ export const users = pgTable(
 export const usersRelations = relations(users, ({ many }) => ({
   userRoles: many(userRoles),
   assignments: many(userAssignments),
+  sessions: many(sessions),
 }));
 
 export type User = typeof users.$inferSelect;

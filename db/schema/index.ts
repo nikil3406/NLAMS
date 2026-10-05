@@ -6,3 +6,4 @@ export * from './role-permissions';
 export * from './user-roles';
 export * from './administrative-units';
 export * from './user-assignments';
+export * from './sessions';

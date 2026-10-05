@@ -82,7 +82,7 @@ async function verify() {
     fail('PostGIS available', 'extension not found');
   }
 
-  // 4. Seven required tables
+  // 4. Required tables
   const REQUIRED_TABLES = [
     'users',
     'roles',
@@ -91,6 +91,7 @@ async function verify() {
     'user_roles',
     'administrative_units',
     'user_assignments',
+    'sessions',
   ];
 
   console.log('\n  Tables:');
@@ -111,7 +112,7 @@ async function verify() {
     SELECT conname FROM pg_constraint
     WHERE contype = 'f'
       AND conrelid::regclass::text IN (
-        'role_permissions','user_roles','user_assignments','administrative_units'
+        'role_permissions','user_roles','user_assignments','administrative_units','sessions'
       )
     ORDER BY conname
   `;
