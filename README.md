@@ -5,6 +5,7 @@ National Land Acquisition Management System (NLAMS) is an enterprise platform de
 ## Current Status
 
 ```text
+Phase 1 — Step 4: Authorization Foundation  ✓
 Phase 1 — Step 3: Authentication Foundation ✓
 Phase 1 — Step 2: Database Foundation       ✓
 Phase 1 — Step 1: Project Foundation        ✓
@@ -119,6 +120,68 @@ PostgreSQL (`sessions` + `users` tables)
 
 - `getCurrentUser(request?)`: Returns `SafeUser | null`. Works in both Route Handlers (`NextRequest`) and Server Components (`next/headers`).
 - `requireAuthentication(request?)`: Asserts user is authenticated, throws `AuthenticationError` (401) if not. Serves as the protected route foundation for future modules.
+
+---
+
+## Phase 1 — Step 4: Authorization Foundation
+
+NLAMS enforces a **three-layer authorization model** that strictly separates identity (authentication) from capability (authorization):
+
+```text
+requireAuthentication()     ← Who are you?        (Step 3)
+        ↓
+requirePermission(name)     ← What can you do?    (Step 4)
+        ↓
+requireAdministrativeScope  ← Where can you do it? (Step 4)
+        ↓
+canManageUser(actor, target) ← Can you act on this user? (Step 4)
+```
+
+### Authorization Model
+
+- **RBAC:** Permissions are assigned to roles (`role_permissions`), not users. Users hold roles (`user_roles`). Changing a role's permissions propagates to all holders.
+- **Administrative Scope:** Users are assigned to administrative units (`user_assignments`). Their scope includes their assigned units **plus all descendants**, resolved via PostgreSQL recursive CTEs at arbitrary hierarchy depth.
+- **Hierarchical Authority:** `canManageUser()` enforces: (1) required permission, (2) Super Admin bypass, (3) no downgrade of Super Admins, (4) role weight prevents lower-tier managing higher-tier, (5) target's units must be within actor's scope.
+- **Data-Driven Hierarchy:** No `if role === 'STATE_ADMIN'` hard-coding. All hierarchy traversal uses `administrative_units.parent_id` relationships.
+
+### 401 vs 403 Distinction
+
+| Condition | Status |
+|---|---|
+| Missing / expired session cookie | `401 Unauthorized` |
+| Authenticated but missing permission or scope | `403 Forbidden` |
+
+### Authorization Endpoints
+
+| Method | Endpoint | Description | Auth Required |
+|---|---|---|---|
+| `GET` | `/api/auth/permissions` | Returns full authorization context (roles, permissions, assignments) | Yes |
+
+### Authorization Service Structure
+
+```text
+src/services/authorization/
+├── permission.service.ts   # hasPermission(), hasRole(), requirePermission()
+├── scope.service.ts        # isWithinAdministrativeScope(), requireAdministrativeScope()
+└── authorization.service.ts # getUserAuthorizationContext(), canManageUser()
+
+src/repositories/
+├── role.repository.ts               # findRolesByUserId(), findRoleByName()
+├── permission.repository.ts         # findPermissionsByUserId(), hasPermission()
+├── administrative-unit.repository.ts # getDescendantUnitIds(), isDescendantOrSelf() (CTE)
+└── user-assignment.repository.ts    # findActiveAssignmentsWithUnitsByUserId()
+```
+
+### Development Hierarchy (extended for authorization tests)
+
+```text
+Central Government (IND)
+  ├── Karnataka (KA)
+  │     ├── Bengaluru Urban (KA-BLR)
+  │     │     └── Bengaluru North (KA-BLR-N)
+  │     └── Mysuru (KA-MYS)
+  └── Maharashtra (MH)
+```
 
 ## Project Structure
 

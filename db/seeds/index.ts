@@ -101,9 +101,12 @@ const ROLE_PERMISSIONS: Record<string, PermissionName[]> = {
 // Development-only administrative hierarchy
 // Real government data will be configured in a later phase.
 const ADMIN_UNITS: { name: string; code: string; type: string; parentCode: string | null }[] = [
-  { name: 'Central Government', code: 'IND',    type: 'CENTRAL',  parentCode: null  },
-  { name: 'Karnataka',          code: 'KA',     type: 'STATE',    parentCode: 'IND' },
-  { name: 'Bengaluru Urban',    code: 'KA-BLR', type: 'DISTRICT', parentCode: 'KA'  },
+  { name: 'Central Government', code: 'IND',      type: 'CENTRAL',  parentCode: null   },
+  { name: 'Karnataka',          code: 'KA',       type: 'STATE',    parentCode: 'IND'  },
+  { name: 'Bengaluru Urban',    code: 'KA-BLR',   type: 'DISTRICT', parentCode: 'KA'   },
+  { name: 'Bengaluru North',    code: 'KA-BLR-N', type: 'TALUK',    parentCode: 'KA-BLR' },
+  { name: 'Mysuru',             code: 'KA-MYS',   type: 'DISTRICT', parentCode: 'KA'   },
+  { name: 'Maharashtra',        code: 'MH',       type: 'STATE',    parentCode: 'IND'  },
 ];
 
 // ----------------------------------------------------------------
