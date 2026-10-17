@@ -5,10 +5,11 @@ National Land Acquisition Management System (NLAMS) is an enterprise platform de
 ## Current Status
 
 ```text
-Phase 1 — Step 4: Authorization Foundation  ✓
-Phase 1 — Step 3: Authentication Foundation ✓
-Phase 1 — Step 2: Database Foundation       ✓
-Phase 1 — Step 1: Project Foundation        ✓
+Phase 2 — Step 1: Administrative Hierarchy Foundation + UI Shell ✓
+Phase 1 — Step 4: Authorization Foundation                     ✓
+Phase 1 — Step 3: Authentication Foundation                    ✓
+Phase 1 — Step 2: Database Foundation                          ✓
+Phase 1 — Step 1: Project Foundation                           ✓
 ```
 
 ## Stack
@@ -291,3 +292,30 @@ PostgreSQL / PostGIS (Relational & Spatial Database)
 - **Services** encapsulate validation and business rules without direct database coupling.
 - **Repositories** abstract query execution and data persistence.
 - **PostgreSQL + PostGIS** will store relational domain data and geospatial boundary geometries starting in Phase 1 — Step 2.
+
+## Phase 2 — Step 1: Administrative Hierarchy & Application UI Shell
+
+### Administrative Hierarchy Model
+- Data-driven hierarchy via self-referencing `administrative_units.parent_id`.
+- Arbitrary hierarchy depth ($Level_1 \rightarrow Level_2 \dots Level_N$) with no fixed tier columns.
+- PostgreSQL recursive Common Table Expressions (CTEs) for ancestor and descendant traversal.
+- Circular hierarchy prevention at the service layer: units cannot be their own parent and cannot set a descendant as parent.
+
+### Administrative Hierarchy API
+Protected route handlers enforcing authentication, Zod validation, permissions, and administrative scope:
+
+| Method | Endpoint | Description | Required Permission | Scope Enforced |
+|---|---|---|---|---|
+| `GET` | `/api/administrative-units` | List units (or hierarchy tree with `?tree=true`) | `ADMIN_UNIT_VIEW` | Scoped to assigned units |
+| `POST` | `/api/administrative-units` | Create administrative unit | `ADMIN_UNIT_CREATE` | Scoped to parent unit |
+| `GET` | `/api/administrative-units/:id` | Get unit details, ancestors, and child counts | `ADMIN_UNIT_VIEW` | Unit within scope |
+| `PATCH` | `/api/administrative-units/:id` | Update unit details or parent relationship | `ADMIN_UNIT_UPDATE` | Unit and new parent within scope |
+| `GET` | `/api/administrative-units/:id/children` | List immediate child administrative units | `ADMIN_UNIT_VIEW` | Unit within scope |
+| `GET` | `/api/administrative-units/:id/tree` | Retrieve nested subtree rooted at unit | `ADMIN_UNIT_VIEW` | Unit within scope |
+
+### Application UI Shell
+- Reusable authenticated layout (`AppShell`, `Sidebar`, `Header`, `UserMenu`, `Breadcrumb`).
+- `/login`: Government officer sign-in portal with Argon2id authentication.
+- `/dashboard`: Welcome banner, authenticated officer role and scope summary, real administrative metrics from PostgreSQL, and roadmap modules grid.
+- `/administrative-units`: Interactive hierarchy tree with node expansion, quick search/filter, unit detail panel, ancestor breadcrumbs, and permission-aware Create/Edit modals.
+
