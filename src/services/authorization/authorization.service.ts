@@ -9,7 +9,7 @@ import { sanitizeUser } from '../auth/session.service';
  * Relative authority weight of system roles to prevent lower-tier officers
  * from managing higher-tier officers (even within the same administrative unit).
  */
-const ROLE_AUTHORITY_WEIGHT: Record<string, number> = {
+export const ROLE_AUTHORITY_WEIGHT: Record<string, number> = {
   SUPER_ADMIN: 100,
   MINISTRY_ADMIN: 80,
   PROJECT_OFFICER: 60,

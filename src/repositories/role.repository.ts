@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { db } from '../../db';
 import { roles, type Role } from '../../db/schema/roles';
 import { userRoles } from '../../db/schema/user-roles';
@@ -54,6 +54,13 @@ export class RoleRepository {
   }
 
   /**
+   * Retrieves all available roles in the system.
+   */
+  async findAllRoles(): Promise<Role[]> {
+    return db.select().from(roles).orderBy(roles.name);
+  }
+
+  /**
    * Assigns a role to a user.
    */
   async assignRoleToUser(userId: string, roleId: string, assignedBy: string): Promise<void> {
@@ -62,6 +69,52 @@ export class RoleRepository {
       .values({ userId, roleId, assignedBy })
       .onConflictDoNothing();
   }
+
+  /**
+   * Revokes a role from a user.
+   */
+  async revokeRoleFromUser(userId: string, roleId: string): Promise<boolean> {
+    const deleted = await db
+      .delete(userRoles)
+      .where(and(eq(userRoles.userId, userId), eq(userRoles.roleId, roleId)))
+      .returning();
+
+    return deleted.length > 0;
+  }
+
+  /**
+   * Checks if a user has a specific role assigned.
+   */
+  async hasUserRole(userId: string, roleId: string): Promise<boolean> {
+    const [row] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(userRoles)
+      .where(and(eq(userRoles.userId, userId), eq(userRoles.roleId, roleId)))
+      .limit(1);
+
+    return Number(row?.count ?? 0) > 0;
+  }
+
+  /**
+   * Counts total number of active users with the SUPER_ADMIN role.
+   */
+  async countSuperAdmins(): Promise<number> {
+    const [superAdminRole] = await db
+      .select({ id: roles.id })
+      .from(roles)
+      .where(eq(roles.name, 'SUPER_ADMIN'))
+      .limit(1);
+
+    if (!superAdminRole) return 0;
+
+    const [row] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(userRoles)
+      .where(eq(userRoles.roleId, superAdminRole.id));
+
+    return Number(row?.count ?? 0);
+  }
 }
 
 export const roleRepository = new RoleRepository();
+

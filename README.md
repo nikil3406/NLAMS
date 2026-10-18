@@ -5,11 +5,13 @@ National Land Acquisition Management System (NLAMS) is an enterprise platform de
 ## Current Status
 
 ```text
+Phase 2 — Step 2: User & Authority Management UI/API          ✓
 Phase 2 — Step 1: Administrative Hierarchy Foundation + UI Shell ✓
 Phase 1 — Step 4: Authorization Foundation                     ✓
 Phase 1 — Step 3: Authentication Foundation                    ✓
 Phase 1 — Step 2: Database Foundation                          ✓
 Phase 1 — Step 1: Project Foundation                           ✓
+
 ```
 
 ## Stack
@@ -318,4 +320,100 @@ Protected route handlers enforcing authentication, Zod validation, permissions, 
 - `/login`: Government officer sign-in portal with Argon2id authentication.
 - `/dashboard`: Welcome banner, authenticated officer role and scope summary, real administrative metrics from PostgreSQL, and roadmap modules grid.
 - `/administrative-units`: Interactive hierarchy tree with node expansion, quick search/filter, unit detail panel, ancestor breadcrumbs, and permission-aware Create/Edit modals.
+
+## Phase 2 — Step 2: User & Authority Management UI/API
+
+### Module Structure
+```text
+src/
+├── app/
+│   ├── (dashboard)/
+│   │   └── users/
+│   │       ├── page.tsx                      # User list server component
+│   │       ├── users-client.tsx              # Interactive table, search, filters, pagination
+│   │       ├── new/
+│   │       │   ├── page.tsx                  # Create user server component
+│   │       │   └── create-user-client.tsx    # User provisioning form + temporary password display
+│   │       └── [id]/
+│   │           ├── page.tsx                  # User profile server component
+│   │           └── user-details-client.tsx   # Profile info, roles & assignments management modals
+│   └── api/
+│       ├── users/
+│       │   ├── route.ts                      # GET /api/users, POST /api/users
+│       │   └── [id]/
+│       │       ├── route.ts                  # GET /api/users/[id], PATCH /api/users/[id]
+│       │       ├── roles/
+│       │       │   ├── route.ts              # POST /api/users/[id]/roles
+│       │       │   └── [roleId]/route.ts     # DELETE /api/users/[id]/roles/[roleId]
+│       │       └── assignments/
+│       │           ├── route.ts              # POST /api/users/[id]/assignments
+│       │           └── [assignmentId]/route.ts # PATCH /api/users/[id]/assignments/[assignmentId]
+│       └── roles/
+│           └── route.ts                      # GET /api/roles (delegatable roles for actor)
+├── repositories/
+│   ├── user.repository.ts                    # User queries, paginated scope listing, atomic transactions
+│   ├── user-assignment.repository.ts         # User administrative assignments data access
+│   └── role.repository.ts                    # Roles, user-role associations, Super Admin count
+├── services/
+│   └── users/
+│       ├── user.service.ts                   # User listing, details, atomic creation, profile update
+│       ├── user-role.service.ts              # Role delegation, authority weights, assignment/revocation
+│       └── user-assignment.service.ts        # Unit assignment, scope boundary checks, status updates
+└── validators/
+    └── users/
+        ├── create-user.schema.ts             # Zod validation for user provisioning
+        ├── update-user.schema.ts             # Zod validation for profile modification
+        ├── assign-role.schema.ts             # Zod validation for role assignment
+        ├── create-assignment.schema.ts       # Zod validation for administrative unit assignment
+        ├── update-assignment.schema.ts       # Zod validation for assignment status/dates
+        └── list-users.schema.ts              # Zod validation for paginated filtering
+```
+
+### API Endpoints
+
+| Method | Endpoint | Description | Required Permission | Authorization Enforced |
+|---|---|---|---|---|
+| `GET` | `/api/users` | List users with pagination, search, and filters | `USER_VIEW` | Scoped to caller's administrative subtree |
+| `POST` | `/api/users` | Create user with initial role and unit assignment | `USER_CREATE`, `ROLE_ASSIGN`, `USER_ASSIGN` | Unit within scope; role within delegatable rank |
+| `GET` | `/api/users/[id]` | Retrieve user profile, roles, and assignments | `USER_VIEW` | In-scope or self (returns 404 for out-of-scope) |
+| `PATCH` | `/api/users/[id]` | Update name, phone, or status | `USER_UPDATE` | Management authority; self status escalation blocked |
+| `POST` | `/api/users/[id]/roles` | Assign an authorized role to a user | `ROLE_ASSIGN` | Cannot assign self; role weight $\le$ actor weight |
+| `DELETE` | `/api/users/[id]/roles/[roleId]` | Revoke an authorized role from a user | `ROLE_ASSIGN` | Cannot revoke self; prevents removing last SUPER_ADMIN |
+| `POST` | `/api/users/[id]/assignments` | Assign user to an administrative unit | `USER_ASSIGN` | Cannot assign self; target unit within scope |
+| `PATCH` | `/api/users/[id]/assignments/[assignmentId]` | Update assignment status or end date | `USER_ASSIGN` | Cannot modify self; target unit within scope |
+| `GET` | `/api/roles` | List roles that actor is authorized to delegate | `ROLE_ASSIGN` | Scoped by actor's maximum role authority weight |
+
+### Role Delegation Rules
+1. **Conservative Deny-by-Default**: Role delegation is governed strictly by the actor's permissions and relative authority weights (`SUPER_ADMIN`: 100, `MINISTRY_ADMIN`: 80, `PROJECT_OFFICER`: 60, `LAND_OFFICER`: 40, `FIELD_OFFICER`: 20).
+2. **Super Admin Authority**: Super Admins possess national scope and can delegate any system role.
+3. **Non-Super-Admin Restriction**: Non-Super-Admins can **never** grant `SUPER_ADMIN` privileges under any circumstance.
+4. **Authority Inversion Prevention**: Officers cannot grant or revoke roles with authority weight exceeding their own highest role.
+5. **Self-Escalation Prohibition**: Users cannot assign roles or administrative units to themselves, nor can they alter their own account status.
+6. **Last Super Admin Protection**: The system enforces that at least one active `SUPER_ADMIN` must remain in the platform; revoking or deactivating the last Super Admin is rejected.
+7. **Documented Limitation**: Role hierarchy is currently mapped through system roles and authority weights defined in code. Dynamic role delegation policies (e.g. per-ministry custom roles or temporary delegable powers) will be formalized in later governance steps.
+
+### Administrative Scope Restrictions
+1. **Data-Driven Subtree Scope**: Administrative scopes are derived dynamically from `user_assignments` joined with `administrative_units.parent_id` recursive CTEs.
+2. **Branch Isolation**: Officers assigned to one branch (e.g., Karnataka) cannot view, manage, or assign users to another branch (e.g., Maharashtra).
+3. **Peer Isolation**: Officers assigned to a district (e.g., Bengaluru Urban) cannot manage users in peer districts (e.g., Mysuru).
+4. **Superior Protection**: Lower-level officers cannot manage officers at higher or superior tiers, even within the same administrative jurisdiction.
+5. **Information Disclosure Policy**: Requesting user details or resources outside an officer's authorized administrative scope returns HTTP 404 (Not Found) rather than 403 (Forbidden) to prevent user ID enumeration.
+
+### User Creation and Password Handling
+1. **Atomic Creation**: User provisioning executes within a PostgreSQL transaction (`db.transaction`) ensuring the user record, role link, and administrative unit assignment succeed or fail together.
+2. **Password Security**:
+   - Initial passwords are generated as cryptographically secure random temporary passphrases (or accepted via validation).
+   - Passwords are exclusively hashed using Argon2id with OWASP-recommended memory and parallelism settings via `@node-rs/argon2`.
+   - Plaintext passwords and `password_hash` fields are never stored in plain text and are strictly omitted from all client responses and sanitized objects.
+3. **Development Relay Limitation**: In the absence of an external transactional email provider (SMTP/SES), generated temporary passwords are presented to the administrator in a one-time secure visual alert with a copy button during provisioning. This limitation is intentional to avoid unauthorized external dependencies during Phase 2.
+
+### Running Tests
+
+```bash
+# Run all automated tests (126 tests across all modules)
+pnpm test
+
+# Run User & Authority Management tests only
+pnpm tsx --test tests/users/users.test.ts
+```
 

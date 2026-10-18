@@ -63,6 +63,105 @@ export class UserAssignmentRepository {
   }
 
   /**
+   * Retrieves an assignment by ID.
+   */
+  async findAssignmentById(id: string): Promise<UserAssignment | null> {
+    const [row] = await db
+      .select()
+      .from(userAssignments)
+      .where(eq(userAssignments.id, id))
+      .limit(1);
+
+    return row ?? null;
+  }
+
+  /**
+   * Retrieves an assignment joined with unit details by assignment ID.
+   */
+  async findAssignmentWithUnitById(id: string): Promise<UserAssignmentWithUnit | null> {
+    const [row] = await db
+      .select({
+        assignment: userAssignments,
+        administrativeUnit: administrativeUnits,
+      })
+      .from(userAssignments)
+      .innerJoin(
+        administrativeUnits,
+        eq(userAssignments.administrativeUnitId, administrativeUnits.id)
+      )
+      .where(eq(userAssignments.id, id))
+      .limit(1);
+
+    return row ?? null;
+  }
+
+  /**
+   * Retrieves all assignments (active and inactive) for a user with unit details.
+   */
+  async findAllAssignmentsWithUnitsByUserId(
+    userId: string
+  ): Promise<UserAssignmentWithUnit[]> {
+    const rows = await db
+      .select({
+        assignment: userAssignments,
+        administrativeUnit: administrativeUnits,
+      })
+      .from(userAssignments)
+      .innerJoin(
+        administrativeUnits,
+        eq(userAssignments.administrativeUnitId, administrativeUnits.id)
+      )
+      .where(eq(userAssignments.userId, userId))
+      .orderBy(userAssignments.createdAt);
+
+    return rows;
+  }
+
+  /**
+   * Checks if a user already has an active assignment for the given unit.
+   */
+  async findActiveAssignmentByUserAndUnit(
+    userId: string,
+    administrativeUnitId: string
+  ): Promise<UserAssignment | null> {
+    const [row] = await db
+      .select()
+      .from(userAssignments)
+      .where(
+        and(
+          eq(userAssignments.userId, userId),
+          eq(userAssignments.administrativeUnitId, administrativeUnitId),
+          eq(userAssignments.status, 'ACTIVE')
+        )
+      )
+      .limit(1);
+
+    return row ?? null;
+  }
+
+  /**
+   * Updates an existing administrative assignment.
+   */
+  async updateAssignment(
+    id: string,
+    data: Partial<{
+      status: 'ACTIVE' | 'INACTIVE';
+      endDate: string | null;
+    }>
+  ): Promise<UserAssignment | null> {
+    const [updated] = await db
+      .update(userAssignments)
+      .set({
+        ...data,
+        updatedAt: new Date(),
+      })
+      .where(eq(userAssignments.id, id))
+      .returning();
+
+    return updated ?? null;
+  }
+
+  /**
    * Creates a new user administrative assignment.
    */
   async createAssignment(data: NewUserAssignment): Promise<UserAssignment> {
@@ -85,3 +184,4 @@ export class UserAssignmentRepository {
 }
 
 export const userAssignmentRepository = new UserAssignmentRepository();
+
