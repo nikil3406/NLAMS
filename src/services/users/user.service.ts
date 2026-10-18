@@ -17,11 +17,15 @@ import {
   ForbiddenError,
   NotFoundError,
 } from '../../types/errors';
+import { sanitizeUser } from '../auth/session.service';
+import type { SafeUser } from '../../types/auth';
 import type {
   CreateUserInput,
   ListUsersQuery,
   UpdateUserInput,
+  UpdateSelfProfileInput,
 } from '../../validators/users';
+
 
 export interface CreateUserResult {
   user: UserWithDetails;
@@ -288,6 +292,46 @@ export class UserService {
 
     return updated;
   }
+
+  /**
+   * Updates the authenticated caller's own personal profile information.
+   * Target user ID is derived strictly from the authenticated session.
+   */
+  async updateSelfProfile(
+    userId: string,
+    input: UpdateSelfProfileInput
+  ): Promise<SafeUser> {
+    const user = await userRepository.findUserById(userId);
+    if (!user) {
+      throw new NotFoundError('User not found');
+    }
+
+    // Check email uniqueness if changing email
+    if (input.email) {
+      const normalizedEmail = input.email.trim().toLowerCase();
+      if (normalizedEmail !== user.email.toLowerCase()) {
+        const taken = await userRepository.isEmailTaken(normalizedEmail, userId);
+        if (taken) {
+          throw new ConflictError(
+            'A user with this email address already exists in the system'
+          );
+        }
+      }
+    }
+
+    const updated = await userRepository.updatePersonalProfile(userId, {
+      name: input.name,
+      email: input.email,
+      phone: input.phone,
+    });
+
+    if (!updated) {
+      throw new NotFoundError('Failed to update personal profile');
+    }
+
+    return sanitizeUser(updated);
+  }
 }
+
 
 export const userService = new UserService();

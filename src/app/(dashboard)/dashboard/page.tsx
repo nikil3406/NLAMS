@@ -43,8 +43,9 @@ export default async function DashboardPage() {
     {
       name: 'User Management',
       description: 'Manage officer accounts, credentials, and administrative appointments.',
-      status: 'COMING_SOON',
-      phase: 'Phase 2, Step 2',
+      status: 'AVAILABLE',
+      href: '/users',
+      actionText: 'Manage Users →',
       icon: (
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />

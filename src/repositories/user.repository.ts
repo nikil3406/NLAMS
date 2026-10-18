@@ -472,6 +472,41 @@ export class UserRepository {
     return updated ?? null;
   }
 
+  /**
+   * Updates an authenticated user's own personal profile information (name, email, phone).
+   * Used exclusively for self-service profile management.
+   */
+  async updatePersonalProfile(
+    id: string,
+    data: {
+      name?: string;
+      email?: string;
+      phone?: string | null;
+    }
+  ): Promise<User | null> {
+    const updateData: Partial<User> = {
+      updatedAt: new Date(),
+    };
+
+    if (data.name !== undefined) {
+      updateData.name = data.name.trim();
+    }
+    if (data.email !== undefined) {
+      updateData.email = data.email.trim().toLowerCase();
+    }
+    if (data.phone !== undefined) {
+      updateData.phone = data.phone?.trim() || null;
+    }
+
+    const [updated] = await db
+      .update(users)
+      .set(updateData)
+      .where(eq(users.id, id))
+      .returning();
+
+    return updated ?? null;
+  }
 }
+
 
 export const userRepository = new UserRepository();
