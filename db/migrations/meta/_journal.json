@@ -15,6 +15,13 @@
       "when": 1791210400858,
       "tag": "0001_tired_mercury",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792379331886,
+      "tag": "0002_cultured_gideon",
+      "breakpoints": true
     }
   ]
 }

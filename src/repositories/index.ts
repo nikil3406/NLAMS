@@ -4,3 +4,5 @@ export * from './role.repository';
 export * from './permission.repository';
 export * from './administrative-unit.repository';
 export * from './user-assignment.repository';
+export * from './implementing-agency.repository';
+export * from './project.repository';

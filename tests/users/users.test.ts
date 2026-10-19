@@ -256,7 +256,7 @@ describe('NLAMS User & Authority Management — Phase 2 Step 2', () => {
         cookie: blrOfficerCookie,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ name: 'Hacked Name' }),
+      body: JSON.stringify({ status: 'INACTIVE' }),
     });
 
     const res = await userDetailPatchHandler(req, {
@@ -273,7 +273,7 @@ describe('NLAMS User & Authority Management — Phase 2 Step 2', () => {
         cookie: blrOfficerCookie,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ name: 'Subordinate Overwrite' }),
+      body: JSON.stringify({ status: 'INACTIVE' }),
     });
 
     const res = await userDetailPatchHandler(req, {

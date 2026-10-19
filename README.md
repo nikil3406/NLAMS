@@ -5,13 +5,13 @@ National Land Acquisition Management System (NLAMS) is an enterprise platform de
 ## Current Status
 
 ```text
+Phase 2 — Step 3: Project Management Foundation + Agency Catalogue  ✓
 Phase 2 — Step 2: User & Authority Management UI/API          ✓
 Phase 2 — Step 1: Administrative Hierarchy Foundation + UI Shell ✓
 Phase 1 — Step 4: Authorization Foundation                     ✓
 Phase 1 — Step 3: Authentication Foundation                    ✓
 Phase 1 — Step 2: Database Foundation                          ✓
 Phase 1 — Step 1: Project Foundation                           ✓
-
 ```
 
 ## Stack
@@ -70,7 +70,7 @@ pnpm db:studio
 
 ### Schema
 
-8 Phase 1 tables in `db/schema/`:
+10 core tables in `db/schema/`:
 
 | Table | Description |
 |---|---|
@@ -82,6 +82,8 @@ pnpm db:studio
 | `administrative_units` | Self-referencing hierarchy (Central → State → District) |
 | `user_assignments` | User → Administrative unit assignments |
 | `sessions` | Server-side sessions storing SHA-256 hashed tokens with expiration |
+| `implementing_agencies` | Government organizations & PSUs initiating infrastructure projects |
+| `projects` | Infrastructure & land acquisition projects with exact numeric costs & codes |
 
 ## Phase 1 — Step 3: Authentication Foundation
 
@@ -410,10 +412,163 @@ src/
 ### Running Tests
 
 ```bash
-# Run all automated tests (126 tests across all modules)
+# Run all automated tests (145 tests across all modules)
 pnpm test
 
 # Run User & Authority Management tests only
 pnpm tsx --test tests/users/users.test.ts
+
+# Run Implementing Agency catalogue tests only
+pnpm tsx --test tests/agencies/agencies.test.ts
+
+# Run Project Management tests only
+pnpm tsx --test tests/projects/projects.test.ts
 ```
+
+## Phase 2 — Step 3: Project Management Foundation + Government Agency Catalogue
+
+NLAMS delivers the first complete Project Management module together with an authoritative seeded catalogue of government implementing agencies. Every project represents a government or public-purpose infrastructure initiative that may or may not require land acquisition.
+
+### Architecture
+
+```text
+Next.js App Router (UI / API Route Handlers)
+      │
+      ├── GET, POST    /api/projects
+      ├── GET, PATCH   /api/projects/[id]
+      ├── POST         /api/projects/[id]/register
+      ├── PATCH        /api/projects/[id]/status
+      ├── GET          /api/implementing-agencies
+      └── GET          /api/implementing-agencies/[id]
+            │
+            ▼
+Service Layer (`src/services/projects/`, `src/services/implementing-agencies/`)
+      │  Enforces Permissions: PROJECT_VIEW, PROJECT_CREATE, PROJECT_UPDATE, PROJECT_REGISTER
+      │  Enforces Administrative Scope: Data-driven boundary traversal via recursive CTEs
+      │  Enforces Status Transition Rules: Strict transition matrix & terminal states
+      │  Enforces Active Agency Validation: Verified and active government agency check
+            │
+            ▼
+Repository Layer (`src/repositories/project.repository.ts`, `src/repositories/implementing-agency.repository.ts`)
+      │  Database queries only, SQL joins for agency and unit metadata
+      │  Concurrency-safe project code generation via PostgreSQL sequence `project_code_seq`
+            │
+            ▼
+Drizzle ORM 0.45 ──▶ PostgreSQL 15 (Tables: `projects`, `implementing_agencies`, `administrative_units`, `users`)
+```
+
+### Implementing Agency Catalogue & Provenance
+
+The implementing agencies catalogue represents legitimate government ministries, departments, and public sector undertakings (PSUs) eligible to implement infrastructure projects. The initial catalogue is seeded idempotently from authoritative public government sources.
+
+#### Seeded Implementing Agencies
+
+| Code | Organization Name | Category | Administrative Unit | Official Website | Verified Public Source |
+|---|---|---|---|---|---|
+| `MORTH` | Ministry of Road Transport and Highways | `CENTRAL_MINISTRY` | Central Government (`IND`) | [morth.gov.in](https://morth.gov.in/) | [morth.gov.in](https://morth.gov.in/) |
+| `NHAI` | National Highways Authority of India | `STATUTORY_AUTHORITY` | Central Government (`IND`) | [nhai.gov.in](https://nhai.gov.in/) | [nhai.gov.in](https://nhai.gov.in/) |
+| `NHIDCL` | National Highways and Infrastructure Development Corporation Limited | `CENTRAL_PSU` | Central Government (`IND`) | [nhidcl.com](https://nhidcl.com/) | [nhidcl.com](https://nhidcl.com/) |
+| `MOR` | Ministry of Railways | `CENTRAL_MINISTRY` | Central Government (`IND`) | [indianrailways.gov.in](https://indianrailways.gov.in/) | [indianrailways.gov.in](https://indianrailways.gov.in/) |
+| `RVNL` | Rail Vikas Nigam Limited | `CENTRAL_PSU` | Central Government (`IND`) | [rvnl.org](https://rvnl.org/) | [rvnl.org](https://rvnl.org/) |
+| `DFCCIL` | Dedicated Freight Corridor Corporation of India Limited | `CENTRAL_PSU` | Central Government (`IND`) | [dfccil.com](https://dfccil.com/) | [dfccil.com](https://dfccil.com/) |
+| `KPWD` | Public Works Department, Government of Karnataka | `STATE_DEPARTMENT` | Karnataka (`KA`) | [kpwd.karnataka.gov.in](https://kpwd.karnataka.gov.in/) | [karnataka.gov.in](https://www.karnataka.gov.in/) |
+| `KRDCL` | Karnataka Road Development Corporation Limited | `STATE_PSU` | Karnataka (`KA`) | [krdcl.karnataka.gov.in](https://krdcl.karnataka.gov.in/) | [krdcl.karnataka.gov.in](https://krdcl.karnataka.gov.in/) |
+| `BMRCL` | Bangalore Metro Rail Corporation Limited | `STATE_PSU` | Bengaluru Urban (`KA-BLR`) | [english.bmrc.co.in](https://english.bmrc.co.in/) | [karnataka.gov.in](https://www.karnataka.gov.in/) |
+
+#### Source Verification Meaning
+> [!IMPORTANT]
+> **Source verification means that the organization's public identity, legal name, and website were verified against authoritative official government directories.**
+> It **DOES NOT** imply that:
+> - The organization has completed a separate NLAMS accreditation workflow.
+> - Any individual employee is automatically an authorized NLAMS user.
+> - The organization has legal or statutory powers to acquire land without statutory notifications.
+> - The agency catalogue permits public creation/editing via API: the catalogue is strictly **read-only** in application APIs.
+
+#### Seed Script & Idempotency
+- Run seed via: `pnpm db:seed`
+- The seed script is completely idempotent: agency codes (`MORTH`, `NHAI`, etc.) serve as stable unique keys. Running the script multiple times reports `0 inserted, 0 updated, 9 unchanged, 0 skipped` and does not create duplicates.
+
+### Project Database Schema
+
+Stored in `db/schema/projects.ts`:
+
+- `id`: UUID primary key (`gen_random_uuid()`).
+- `projectCode`: Unique, system-generated identifier (`NLAMS-PRJ-000001`).
+- `name`: Official project name (varchar 255).
+- `description`: Optional project description (text).
+- `projectType`: Controlled category (`Highway`, `Railway`, `Metro`, `Irrigation`, `Water Supply`, `Energy`, `Public Infrastructure`, `Other`).
+- `implementingAgencyId`: Foreign key referencing `implementing_agencies.id` (`ON DELETE RESTRICT`).
+- `administrativeUnitId`: Foreign key referencing `administrative_units.id` (`ON DELETE RESTRICT`).
+- `createdBy`: Foreign key referencing `users.id` (`ON DELETE RESTRICT`).
+- `landAcquisitionRequired`: Boolean flag (default `true`).
+- `estimatedCost`: Exact numeric monetary storage (`numeric(18, 2)`). Floating point database types are strictly prohibited.
+- `plannedStartDate`: Optional start date (`date`).
+- `plannedEndDate`: Optional end date (`date`).
+- `status`: Controlled project status (`DRAFT`, `REGISTERED`, `ON_HOLD`, `COMPLETED`, `CANCELLED`).
+- `createdAt` / `updatedAt`: Timestamps with timezones.
+
+### Project Code Generation
+Project codes follow the format `NLAMS-PRJ-000001` and are generated concurrency-safely on the server using a dedicated PostgreSQL sequence:
+```sql
+CREATE SEQUENCE IF NOT EXISTS "project_code_seq" START WITH 1 INCREMENT BY 1;
+```
+Concurrent creation requests never clash, generate duplicate codes, or depend on race-condition row counts. Project codes, IDs, and creator identities are strictly server-controlled and rejected if supplied by clients.
+
+### Project Lifecycle & Status Transitions
+
+```mermaid
+stateDiagram-v2
+    [*] --> DRAFT: Project Creation
+    DRAFT --> REGISTERED: Register Project (PROJECT_REGISTER)
+    DRAFT --> CANCELLED: Cancel Project (PROJECT_UPDATE)
+    REGISTERED --> ON_HOLD: Put On Hold (PROJECT_UPDATE)
+    ON_HOLD --> REGISTERED: Resume Project (PROJECT_UPDATE)
+    REGISTERED --> COMPLETED: Mark Completed (PROJECT_UPDATE)
+    REGISTERED --> CANCELLED: Cancel Project (PROJECT_UPDATE)
+    ON_HOLD --> CANCELLED: Cancel Project (PROJECT_UPDATE)
+    COMPLETED --> [*]: Terminal State
+    CANCELLED --> [*]: Terminal State
+```
+
+1. **New Projects start in `DRAFT`**: New projects must be reviewed before formal registration in NLAMS.
+2. **Registration Action**: Requires `PROJECT_REGISTER` permission and moves project from `DRAFT` to `REGISTERED`.
+3. **General Project Update Prohibition**: Arbitrary status transitions cannot be submitted through `PATCH /api/projects/[id]`. Status transitions are handled exclusively through dedicated endpoints (`/api/projects/[id]/register` and `/api/projects/[id]/status`).
+4. **Terminal States**: `COMPLETED` and `CANCELLED` are terminal. Terminal projects cannot transition to other statuses and their core attributes cannot be modified.
+
+### Permissions & Administrative Scope
+
+1. **Role Permissions**:
+   - `PROJECT_VIEW`: View projects and detailed metadata.
+   - `PROJECT_CREATE`: Create new projects.
+   - `PROJECT_UPDATE`: Update project attributes and non-registration status transitions.
+   - `PROJECT_REGISTER`: Formally register draft projects.
+   - Role assignments: `SUPER_ADMIN`, `MINISTRY_ADMIN`, and `PROJECT_OFFICER` hold full project management permissions. `LAND_OFFICER` and `FIELD_OFFICER` hold `PROJECT_VIEW` to support land assessment.
+2. **Administrative Scope Containment**:
+   - Super Admins have nationwide project management authority.
+   - State and district officers can only create, list, view, edit, and transition projects located within their authorized administrative unit hierarchy.
+   - Cross-scope project access returns `404 Not Found` to prevent project ID enumeration.
+   - Selecting a national agency (e.g. NHAI) does not permit an officer to operate outside their assigned administrative boundary (e.g. a Karnataka officer cannot create a project in Maharashtra even if NHAI is the implementing agency).
+
+### API Endpoints
+
+| Method | Endpoint | Description | Permission | Scope Enforced |
+|---|---|---|---|---|
+| `GET` | `/api/implementing-agencies` | List active/all agencies with search & pagination | Authenticated | System-wide read-only catalogue |
+| `GET` | `/api/implementing-agencies/[id]` | Get agency details and hierarchy | Authenticated | System-wide read-only catalogue |
+| `GET` | `/api/projects` | List projects with search, status, type, and agency filters | `PROJECT_VIEW` | Scoped to user's administrative jurisdiction |
+| `POST` | `/api/projects` | Create draft project with sequential code | `PROJECT_CREATE` | Target administrative unit must be within user's scope |
+| `GET` | `/api/projects/[id]` | Retrieve full project, agency, and unit details | `PROJECT_VIEW` | 404 if project is outside user's scope |
+| `PATCH` | `/api/projects/[id]` | Update editable fields (name, cost, dates, etc.) | `PROJECT_UPDATE` | 404 if outside scope; status changes rejected |
+| `POST` | `/api/projects/[id]/register` | Transition DRAFT project to REGISTERED | `PROJECT_REGISTER` | Project must be in DRAFT and within user scope |
+| `PATCH` | `/api/projects/[id]/status` | Transition project status (ON_HOLD, COMPLETED, CANCELLED) | `PROJECT_UPDATE` | Governed by transition matrix; terminal state checks |
+
+### Explicit Exclusions & Deferred Functionality
+In accordance with system design specifications, the following workflows are deliberately deferred to later phases:
+- New agency registration and application submission.
+- Agency verification or approval workflows.
+- Agency-user membership tables and agency-specific authentication.
+- Designated primary manager/controller per administrative unit.
+- Multi-level statutory project approvals.
+- Land parcel acquisition and compensation processing.
+- GIS mapping and spatial overlays.
 

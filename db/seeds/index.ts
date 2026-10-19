@@ -22,6 +22,7 @@ import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { hash } from '@node-rs/argon2';
 import * as schema from '../schema/index.js';
+import { seedImplementingAgencies } from './implementing-agencies.js';
 
 // ----------------------------------------------------------------
 // Load .env.local manually (tsx does not auto-load it)
@@ -78,6 +79,10 @@ const PERMISSIONS = [
   { name: 'ADMIN_UNIT_VIEW',   description: 'View administrative unit details' },
   { name: 'ADMIN_UNIT_CREATE', description: 'Create new administrative units' },
   { name: 'ADMIN_UNIT_UPDATE', description: 'Update administrative unit information' },
+  { name: 'PROJECT_VIEW',      description: 'View projects and details' },
+  { name: 'PROJECT_CREATE',    description: 'Create new infrastructure projects' },
+  { name: 'PROJECT_UPDATE',    description: 'Update existing project details' },
+  { name: 'PROJECT_REGISTER',  description: 'Formally register draft projects' },
 ] as const;
 
 type PermissionName = typeof PERMISSIONS[number]['name'];
@@ -87,15 +92,20 @@ const ROLE_PERMISSIONS: Record<string, PermissionName[]> = {
     'USER_VIEW', 'USER_CREATE', 'USER_UPDATE', 'USER_ASSIGN',
     'ROLE_VIEW', 'ROLE_ASSIGN',
     'ADMIN_UNIT_VIEW', 'ADMIN_UNIT_CREATE', 'ADMIN_UNIT_UPDATE',
+    'PROJECT_VIEW', 'PROJECT_CREATE', 'PROJECT_UPDATE', 'PROJECT_REGISTER',
   ],
   MINISTRY_ADMIN: [
     'USER_VIEW', 'USER_CREATE', 'USER_UPDATE', 'USER_ASSIGN',
     'ROLE_VIEW', 'ROLE_ASSIGN',
     'ADMIN_UNIT_VIEW', 'ADMIN_UNIT_CREATE', 'ADMIN_UNIT_UPDATE',
+    'PROJECT_VIEW', 'PROJECT_CREATE', 'PROJECT_UPDATE', 'PROJECT_REGISTER',
   ],
-  PROJECT_OFFICER: ['USER_VIEW', 'ROLE_VIEW', 'ADMIN_UNIT_VIEW'],
-  LAND_OFFICER:    ['USER_VIEW', 'ROLE_VIEW', 'ADMIN_UNIT_VIEW'],
-  FIELD_OFFICER:   ['USER_VIEW', 'ADMIN_UNIT_VIEW'],
+  PROJECT_OFFICER: [
+    'USER_VIEW', 'ROLE_VIEW', 'ADMIN_UNIT_VIEW',
+    'PROJECT_VIEW', 'PROJECT_CREATE', 'PROJECT_UPDATE', 'PROJECT_REGISTER',
+  ],
+  LAND_OFFICER:    ['USER_VIEW', 'ROLE_VIEW', 'ADMIN_UNIT_VIEW', 'PROJECT_VIEW'],
+  FIELD_OFFICER:   ['USER_VIEW', 'ADMIN_UNIT_VIEW', 'PROJECT_VIEW'],
 };
 
 // Development-only administrative hierarchy
@@ -237,6 +247,13 @@ async function seed() {
       .onConflictDoNothing();
     console.log('  ✓ SUPER_ADMIN role assigned');
   }
+
+  // 6. Implementing Agencies Catalogue
+  console.log('\n📌 Seeding implementing agencies catalogue...');
+  const agencyStats = await seedImplementingAgencies(db);
+  console.log(
+    `  Summary: ${agencyStats.inserted} inserted, ${agencyStats.updated} updated, ${agencyStats.unchanged} unchanged, ${agencyStats.skipped} skipped.`
+  );
 
   console.log('\n✅ Seed completed successfully.\n');
 }
