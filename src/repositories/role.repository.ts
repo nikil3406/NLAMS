@@ -2,6 +2,12 @@ import { and, eq, sql } from 'drizzle-orm';
 import { db } from '../../db';
 import { roles, type Role } from '../../db/schema/roles';
 import { userRoles } from '../../db/schema/user-roles';
+import { rolePermissions } from '../../db/schema/role-permissions';
+import { permissions, type Permission } from '../../db/schema/permissions';
+
+export interface RoleWithPermissions extends Role {
+  permissions: Permission[];
+}
 
 /**
  * Role repository providing data access for system roles and user-role assignments.
@@ -58,6 +64,80 @@ export class RoleRepository {
    */
   async findAllRoles(): Promise<Role[]> {
     return db.select().from(roles).orderBy(roles.name);
+  }
+
+  /**
+   * Retrieves all roles with their associated permissions.
+   */
+  async findAllRolesWithPermissions(): Promise<RoleWithPermissions[]> {
+    const allRoles = await db.select().from(roles).orderBy(roles.name);
+
+    const result: RoleWithPermissions[] = [];
+    for (const role of allRoles) {
+      const perms = await db
+        .select({
+          id: permissions.id,
+          name: permissions.name,
+          description: permissions.description,
+          createdAt: permissions.createdAt,
+        })
+        .from(rolePermissions)
+        .innerJoin(permissions, eq(rolePermissions.permissionId, permissions.id))
+        .where(eq(rolePermissions.roleId, role.id))
+        .orderBy(permissions.name);
+
+      result.push({ ...role, permissions: perms });
+    }
+    return result;
+  }
+
+  /**
+   * Retrieves a single role with its permissions.
+   */
+  async findRoleWithPermissions(roleId: string): Promise<RoleWithPermissions | null> {
+    const role = await this.findRoleById(roleId);
+    if (!role) return null;
+
+    const perms = await db
+      .select({
+        id: permissions.id,
+        name: permissions.name,
+        description: permissions.description,
+        createdAt: permissions.createdAt,
+      })
+      .from(rolePermissions)
+      .innerJoin(permissions, eq(rolePermissions.permissionId, permissions.id))
+      .where(eq(rolePermissions.roleId, roleId))
+      .orderBy(permissions.name);
+
+    return { ...role, permissions: perms };
+  }
+
+  /**
+   * Grants a permission to a role (idempotent).
+   */
+  async addPermissionToRole(roleId: string, permissionId: string): Promise<void> {
+    await db
+      .insert(rolePermissions)
+      .values({ roleId, permissionId })
+      .onConflictDoNothing();
+  }
+
+  /**
+   * Revokes a permission from a role.
+   * Returns true if a record was actually deleted.
+   */
+  async removePermissionFromRole(roleId: string, permissionId: string): Promise<boolean> {
+    const deleted = await db
+      .delete(rolePermissions)
+      .where(
+        and(
+          eq(rolePermissions.roleId, roleId),
+          eq(rolePermissions.permissionId, permissionId)
+        )
+      )
+      .returning();
+    return deleted.length > 0;
   }
 
   /**

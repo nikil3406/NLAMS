@@ -47,6 +47,13 @@ export class PermissionRepository {
   }
 
   /**
+   * Retrieves all system permissions, ordered alphabetically.
+   */
+  async findAllPermissions(): Promise<Permission[]> {
+    return db.select().from(permissions).orderBy(permissions.name);
+  }
+
+  /**
    * Checks directly if a user has a specific permission by name.
    */
   async hasPermission(userId: string, permissionName: string): Promise<boolean> {
