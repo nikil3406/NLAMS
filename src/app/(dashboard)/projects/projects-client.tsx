@@ -122,6 +122,8 @@ export function ProjectsClient({
     }
   };
 
+  const hasActiveFilters = searchTerm || statusFilter || typeFilter || agencyFilter;
+
   return (
     <div className="users-page">
       {/* Header */}
@@ -148,7 +150,8 @@ export function ProjectsClient({
 
       {/* Filter and Search Bar */}
       <form onSubmit={handleSearchSubmit} className="users-filter-bar">
-        <div className="tree-search-wrapper" style={{ flex: '1 1 240px', minWidth: '220px' }}>
+        {/* Search — occupies first grid column (flex: 1) */}
+        <div className="tree-search-wrapper">
           <svg className="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <circle cx="11" cy="11" r="8" />
             <line x1="21" y1="21" x2="16.65" y2="16.65" />
@@ -176,6 +179,7 @@ export function ProjectsClient({
           )}
         </div>
 
+        {/* Status filter */}
         <div className="filter-item">
           <select
             className="filter-select"
@@ -195,6 +199,7 @@ export function ProjectsClient({
           </select>
         </div>
 
+        {/* Type filter */}
         <div className="filter-item">
           <select
             className="filter-select"
@@ -214,33 +219,35 @@ export function ProjectsClient({
           </select>
         </div>
 
-        {agencies.length > 0 && (
-          <div className="filter-item">
-            <select
-              className="filter-select"
-              value={agencyFilter}
-              onChange={(e) => {
-                setAgencyFilter(e.target.value);
-                setPage(1);
-              }}
-              id="filter-agency-select"
-            >
-              <option value="">All Implementing Agencies</option>
-              {agencies.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name} ({a.code})
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
+        {/* Agency filter — always rendered to keep the grid stable; disabled when no agencies */}
+        <div className="filter-item">
+          <select
+            className="filter-select"
+            value={agencyFilter}
+            onChange={(e) => {
+              setAgencyFilter(e.target.value);
+              setPage(1);
+            }}
+            id="filter-agency-select"
+            disabled={agencies.length === 0}
+          >
+            <option value="">All Implementing Agencies</option>
+            {agencies.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name} ({a.code})
+              </option>
+            ))}
+          </select>
+        </div>
 
-        {(searchTerm || statusFilter || typeFilter || agencyFilter) && (
+        {/* Reset button — only visible when there are active filters */}
+        {hasActiveFilters && (
           <button
             type="button"
             className="btn-secondary"
             onClick={handleResetFilters}
             id="btn-reset-filters"
+            style={{ whiteSpace: 'nowrap' }}
           >
             Reset
           </button>
@@ -249,7 +256,7 @@ export function ProjectsClient({
 
       {/* Error Alert */}
       {errorMessage && (
-        <div className="alert-banner-error" role="alert" style={{ marginBottom: '1.25rem' }}>
+        <div className="alert-banner-error" role="alert">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <circle cx="12" cy="12" r="10" />
             <line x1="12" y1="8" x2="12" y2="12" />
@@ -283,105 +290,137 @@ export function ProjectsClient({
           </div>
         ) : (
           <>
-            <table className="users-table">
-              <thead>
-                <tr>
-                  <th>Project Details</th>
-                  <th>Type</th>
-                  <th>Implementing Agency</th>
-                  <th>Administrative Unit</th>
-                  <th>Acquisition</th>
-                  <th>Status</th>
-                  <th>Created</th>
-                  <th style={{ textAlign: 'right' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {projects.map((p) => (
-                  <tr key={p.id} id={`project-row-${p.id}`}>
-                    <td>
-                      <div className="user-name-cell">
+            {/* Horizontal scroll wrapper prevents page-wide overflow */}
+            <div className="users-table-scroll">
+              <table className="users-table projects-table">
+                <colgroup>
+                  <col className="col-details" />
+                  <col className="col-type" />
+                  <col className="col-agency" />
+                  <col className="col-unit" />
+                  <col className="col-acq" />
+                  <col className="col-status" />
+                  <col className="col-created" />
+                  <col className="col-actions" />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th>Project Details</th>
+                    <th>Type</th>
+                    <th>Implementing Agency</th>
+                    <th>Administrative Unit</th>
+                    <th>Acquisition</th>
+                    <th>Status</th>
+                    <th>Created</th>
+                    <th style={{ textAlign: 'right' }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {projects.map((p) => (
+                    <tr key={p.id} id={`project-row-${p.id}`}>
+                      <td>
+                        <div className="user-name-cell">
+                          <Link
+                            href={`/projects/${p.id}`}
+                            className="user-display-name cell-truncate"
+                            style={{ textDecoration: 'none', color: '#fff' }}
+                            title={p.name}
+                          >
+                            {p.name}
+                          </Link>
+                          <span
+                            className="cell-truncate"
+                            style={{
+                              fontFamily: 'var(--font-mono)',
+                              fontSize: '0.75rem',
+                              color: 'var(--accent-secondary)',
+                            }}
+                            title={p.projectCode}
+                          >
+                            {p.projectCode}
+                          </span>
+                        </div>
+                      </td>
+                      <td>
+                        <span className="role-tag-badge">{p.projectType}</span>
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem' }}>
+                          <span
+                            className="cell-truncate"
+                            style={{ fontSize: '0.8125rem', color: '#fff' }}
+                            title={p.implementingAgency?.name ?? '—'}
+                          >
+                            {p.implementingAgency?.name ?? '—'}
+                          </span>
+                          <span style={{ fontSize: '0.6875rem', color: 'var(--text-muted)' }}>
+                            {p.implementingAgency?.code}
+                          </span>
+                        </div>
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem' }}>
+                          <span
+                            className="cell-truncate"
+                            style={{ fontSize: '0.8125rem', color: '#fff' }}
+                            title={p.administrativeUnit?.name ?? '—'}
+                          >
+                            {p.administrativeUnit?.name ?? '—'}
+                          </span>
+                          <span style={{ fontSize: '0.6875rem', color: 'var(--text-muted)' }}>
+                            {p.administrativeUnit?.code} • {p.administrativeUnit?.type}
+                          </span>
+                        </div>
+                      </td>
+                      <td>
+                        <span
+                          style={{
+                            fontSize: '0.75rem',
+                            padding: '0.2rem 0.5rem',
+                            borderRadius: '4px',
+                            backgroundColor: p.landAcquisitionRequired
+                              ? 'rgba(239, 68, 68, 0.15)'
+                              : 'rgba(100, 116, 139, 0.15)',
+                            color: p.landAcquisitionRequired ? '#f87171' : 'var(--text-muted)',
+                            fontWeight: 500,
+                            display: 'inline-block',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {p.landAcquisitionRequired ? 'Required' : 'Not Req.'}
+                        </span>
+                      </td>
+                      <td>
+                        <span className={getStatusBadgeClass(p.status)}>
+                          {p.status}
+                        </span>
+                      </td>
+                      <td>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                          {new Date(p.createdAt).toLocaleDateString()}
+                        </span>
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
                         <Link
                           href={`/projects/${p.id}`}
-                          className="user-display-name"
-                          style={{ textDecoration: 'none', color: '#fff' }}
+                          className="btn-secondary"
+                          style={{ padding: '0.35rem 0.65rem', fontSize: '0.75rem', whiteSpace: 'nowrap' }}
+                          id={`btn-view-project-${p.id}`}
                         >
-                          {p.name}
+                          View Details
                         </Link>
-                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--accent-secondary)' }}>
-                          {p.projectCode}
-                        </span>
-                      </div>
-                    </td>
-                    <td>
-                      <span className="role-tag-badge">{p.projectType}</span>
-                    </td>
-                    <td>
-                      <div style={{ display: 'flex', flexDirection: 'column' }}>
-                        <span style={{ fontSize: '0.8125rem', color: '#fff' }}>
-                          {p.implementingAgency?.name ?? '—'}
-                        </span>
-                        <span style={{ fontSize: '0.6875rem', color: 'var(--text-muted)' }}>
-                          {p.implementingAgency?.code}
-                        </span>
-                      </div>
-                    </td>
-                    <td>
-                      <div style={{ display: 'flex', flexDirection: 'column' }}>
-                        <span style={{ fontSize: '0.8125rem', color: '#fff' }}>
-                          {p.administrativeUnit?.name ?? '—'}
-                        </span>
-                        <span style={{ fontSize: '0.6875rem', color: 'var(--text-muted)' }}>
-                          {p.administrativeUnit?.code} • {p.administrativeUnit?.type}
-                        </span>
-                      </div>
-                    </td>
-                    <td>
-                      <span
-                        style={{
-                          fontSize: '0.75rem',
-                          padding: '0.2rem 0.5rem',
-                          borderRadius: '4px',
-                          backgroundColor: p.landAcquisitionRequired
-                            ? 'rgba(239, 68, 68, 0.15)'
-                            : 'rgba(100, 116, 139, 0.15)',
-                          color: p.landAcquisitionRequired ? '#f87171' : 'var(--text-muted)',
-                          fontWeight: 500,
-                        }}
-                      >
-                        {p.landAcquisitionRequired ? 'Required' : 'Not Required'}
-                      </span>
-                    </td>
-                    <td>
-                      <span className={getStatusBadgeClass(p.status)}>
-                        {p.status}
-                      </span>
-                    </td>
-                    <td>
-                      <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                        {new Date(p.createdAt).toLocaleDateString()}
-                      </span>
-                    </td>
-                    <td style={{ textAlign: 'right' }}>
-                      <Link
-                        href={`/projects/${p.id}`}
-                        className="btn-secondary"
-                        style={{ padding: '0.35rem 0.65rem', fontSize: '0.75rem' }}
-                        id={`btn-view-project-${p.id}`}
-                      >
-                        View Details
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
 
-            {/* Pagination */}
+            {/* Pagination Footer */}
             <div className="pagination-bar">
               <span className="pagination-info">
                 Showing {projects.length > 0 ? (page - 1) * limit + 1 : 0}–
-                {Math.min(page * limit, total)} of {total} projects
+                {Math.min(page * limit, total)} of {total} project{total !== 1 ? 's' : ''}
               </span>
               <div style={{ display: 'flex', gap: '0.5rem' }}>
                 <button

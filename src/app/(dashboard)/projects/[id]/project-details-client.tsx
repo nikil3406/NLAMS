@@ -18,7 +18,6 @@ export function ProjectDetailsClient({
   isSuperAdmin,
 }: ProjectDetailsClientProps) {
 
-
   const canUpdate = isSuperAdmin || userPermissions.includes('PROJECT_UPDATE');
   const canRegister = isSuperAdmin || userPermissions.includes('PROJECT_REGISTER');
 
@@ -183,30 +182,38 @@ export function ProjectDetailsClient({
   const isTerminal = project.status === 'COMPLETED' || project.status === 'CANCELLED';
 
   return (
-    <div className="users-page" style={{ maxWidth: '1000px', margin: '0 auto' }}>
+    <div className="users-page project-details-page">
       {/* Header and Breadcrumbs */}
       <div className="page-header-row">
-        <div>
+        <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', fontSize: '0.8125rem' }}>
             <Link href="/projects" style={{ color: 'var(--accent-secondary)', textDecoration: 'none' }}>
               Projects
             </Link>
             <span style={{ color: 'var(--text-muted)' }}>/</span>
-            <span style={{ color: 'var(--text-secondary)' }}>{project.projectCode}</span>
+            <span
+              style={{ color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '300px' }}
+              title={project.projectCode}
+            >
+              {project.projectCode}
+            </span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-            <h1 className="page-title">{project.name}</h1>
+            <h1 className="page-title" style={{ wordBreak: 'break-word' }}>{project.name}</h1>
             <span className={getStatusBadgeClass(project.status)}>
               {project.status}
             </span>
           </div>
-          <p className="page-subtitle" style={{ fontFamily: 'var(--font-mono)', color: 'var(--accent-secondary)' }}>
+          <p
+            className="page-subtitle"
+            style={{ fontFamily: 'var(--font-mono)', color: 'var(--accent-secondary)', wordBreak: 'break-all' }}
+          >
             {project.projectCode}
           </p>
         </div>
 
         {/* Action Buttons */}
-        <div className="page-actions-group">
+        <div className="page-actions-group" style={{ flexShrink: 0 }}>
           {canUpdate && !isTerminal && (
             <Link
               href={`/projects/${project.id}/edit`}
@@ -240,7 +247,7 @@ export function ProjectDetailsClient({
 
           {/* Status Transitions */}
           {canUpdate && !isTerminal && (
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
               {project.status === 'DRAFT' && (
                 <button
                   type="button"
@@ -277,7 +284,7 @@ export function ProjectDetailsClient({
                     className="btn-cancel"
                     style={{ color: 'var(--status-danger)' }}
                     onClick={() => setStatusModalTarget('CANCELLED')}
-                    id="btn-cancel-project"
+                    id="btn-cancel-project-reg"
                   >
                     Cancel Project
                   </button>
@@ -299,7 +306,7 @@ export function ProjectDetailsClient({
                     className="btn-cancel"
                     style={{ color: 'var(--status-danger)' }}
                     onClick={() => setStatusModalTarget('CANCELLED')}
-                    id="btn-cancel-project"
+                    id="btn-cancel-project-hold"
                   >
                     Cancel Project
                   </button>
@@ -312,7 +319,7 @@ export function ProjectDetailsClient({
 
       {/* Action Success / Error Notifications */}
       {actionSuccessMessage && (
-        <div className="alert-banner-success" role="status" style={{ marginBottom: '1.25rem' }}>
+        <div className="alert-banner-success" role="status">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <polyline points="20 6 9 17 4 12" />
           </svg>
@@ -321,7 +328,7 @@ export function ProjectDetailsClient({
       )}
 
       {errorMessage && (
-        <div className="alert-banner-error" role="alert" style={{ marginBottom: '1.25rem' }}>
+        <div className="alert-banner-error" role="alert">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <circle cx="12" cy="12" r="10" />
             <line x1="12" y1="8" x2="12" y2="12" />
@@ -331,27 +338,25 @@ export function ProjectDetailsClient({
         </div>
       )}
 
-      {/* Main Grid: Info Panels */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.25rem' }}>
-        {/* Core Attributes */}
-        <div className="detail-panel-card">
-          <h2 className="modal-title" style={{ fontSize: '0.9375rem', marginBottom: '1rem' }}>
-            Infrastructure Details
-          </h2>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', fontSize: '0.8125rem' }}>
-            <div>
-              <span style={{ color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>Description</span>
-              <p style={{ color: '#fff', lineHeight: '1.4' }}>
+      {/* Main Grid: Info Panels — consistent two-column layout */}
+      <div className="project-details-grid">
+        {/* Card: Infrastructure Details */}
+        <div className="project-detail-card">
+          <h2 className="project-card-heading">Infrastructure Details</h2>
+          <div className="project-card-body">
+            <div className="project-field">
+              <span className="project-field-label">Description</span>
+              <p className="project-field-value" style={{ lineHeight: '1.5' }}>
                 {project.description || 'No description provided.'}
               </p>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginTop: '0.5rem' }}>
-              <div>
-                <span style={{ color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>Project Type</span>
-                <span className="role-tag-badge">{project.projectType}</span>
+            <div className="project-field-row">
+              <div className="project-field">
+                <span className="project-field-label">Project Type</span>
+                <span className="role-tag-badge" style={{ margin: 0 }}>{project.projectType}</span>
               </div>
-              <div>
-                <span style={{ color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>Land Acquisition</span>
+              <div className="project-field">
+                <span className="project-field-label">Land Acquisition</span>
                 <span
                   style={{
                     fontSize: '0.75rem',
@@ -362,6 +367,7 @@ export function ProjectDetailsClient({
                       : 'rgba(100, 116, 139, 0.15)',
                     color: project.landAcquisitionRequired ? '#f87171' : 'var(--text-muted)',
                     fontWeight: 500,
+                    display: 'inline-block',
                   }}
                 >
                   {project.landAcquisitionRequired ? 'Required' : 'Not Required'}
@@ -371,41 +377,47 @@ export function ProjectDetailsClient({
           </div>
         </div>
 
-        {/* Implementing Agency */}
-        <div className="detail-panel-card">
-          <h2 className="modal-title" style={{ fontSize: '0.9375rem', marginBottom: '1rem' }}>
-            Implementing Agency
-          </h2>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem', fontSize: '0.8125rem' }}>
-            <div>
-              <span style={{ color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>Agency Name</span>
-              <strong style={{ color: '#fff', fontSize: '0.875rem' }}>
-                {project.implementingAgency?.name}
+        {/* Card: Implementing Agency */}
+        <div className="project-detail-card">
+          <h2 className="project-card-heading">Implementing Agency</h2>
+          <div className="project-card-body">
+            <div className="project-field">
+              <span className="project-field-label">Agency Name</span>
+              <strong style={{ color: '#fff', fontSize: '0.875rem', wordBreak: 'break-word' }}>
+                {project.implementingAgency?.name ?? '—'}
               </strong>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-              <div>
-                <span style={{ color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>Agency Code</span>
-                <span className="role-tag-badge">{project.implementingAgency?.code}</span>
+            <div className="project-field-row">
+              <div className="project-field">
+                <span className="project-field-label">Agency Code</span>
+                <span className="role-tag-badge" style={{ margin: 0 }}>{project.implementingAgency?.code ?? '—'}</span>
               </div>
-              <div>
-                <span style={{ color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>Category</span>
-                <span style={{ color: 'var(--text-secondary)' }}>
-                  {project.implementingAgency?.agencyType?.replace('_', ' ')}
+              <div className="project-field">
+                <span className="project-field-label">Category</span>
+                <span style={{ color: 'var(--text-secondary)', fontSize: '0.8125rem' }}>
+                  {project.implementingAgency?.agencyType?.replace('_', ' ') ?? '—'}
                 </span>
               </div>
             </div>
             {project.implementingAgency?.officialWebsite && (
-              <div style={{ marginTop: '0.25rem' }}>
-                <span style={{ color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>Official Website</span>
+              <div className="project-field">
+                <span className="project-field-label">Official Website</span>
                 <a
                   href={project.implementingAgency.officialWebsite}
                   target="_blank"
                   rel="noopener noreferrer"
-                  style={{ color: 'var(--accent-secondary)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                  style={{
+                    color: 'var(--accent-secondary)',
+                    textDecoration: 'none',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                    fontSize: '0.8125rem',
+                    wordBreak: 'break-all',
+                  }}
                 >
                   <span>{project.implementingAgency.officialWebsite}</span>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
                     <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
                     <polyline points="15 3 21 3 21 9" />
                     <line x1="10" y1="14" x2="21" y2="3" />
@@ -413,90 +425,88 @@ export function ProjectDetailsClient({
                 </a>
               </div>
             )}
-            <div style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+            <div style={{ fontSize: '0.6875rem', color: 'var(--text-muted)' }}>
               Provenance: Verified against official public directory.
             </div>
           </div>
         </div>
 
-        {/* Administrative Unit */}
-        <div className="detail-panel-card">
-          <h2 className="modal-title" style={{ fontSize: '0.9375rem', marginBottom: '1rem' }}>
-            Administrative Unit Scope
-          </h2>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem', fontSize: '0.8125rem' }}>
-            <div>
-              <span style={{ color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>Unit Name</span>
-              <strong style={{ color: '#fff', fontSize: '0.875rem' }}>
-                {project.administrativeUnit?.name}
+        {/* Card: Administrative Unit */}
+        <div className="project-detail-card">
+          <h2 className="project-card-heading">Administrative Unit Scope</h2>
+          <div className="project-card-body">
+            <div className="project-field">
+              <span className="project-field-label">Unit Name</span>
+              <strong style={{ color: '#fff', fontSize: '0.875rem', wordBreak: 'break-word' }}>
+                {project.administrativeUnit?.name ?? '—'}
               </strong>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-              <div>
-                <span style={{ color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>Unit Code</span>
-                <span className="role-tag-badge">{project.administrativeUnit?.code}</span>
+            <div className="project-field-row">
+              <div className="project-field">
+                <span className="project-field-label">Unit Code</span>
+                <span className="role-tag-badge" style={{ margin: 0 }}>{project.administrativeUnit?.code ?? '—'}</span>
               </div>
-              <div>
-                <span style={{ color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>Hierarchy Level</span>
-                <span style={{ color: 'var(--text-secondary)' }}>
-                  {project.administrativeUnit?.type}
+              <div className="project-field">
+                <span className="project-field-label">Hierarchy Level</span>
+                <span style={{ color: 'var(--text-secondary)', fontSize: '0.8125rem' }}>
+                  {project.administrativeUnit?.type ?? '—'}
                 </span>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Financials & Timeline */}
-        <div className="detail-panel-card">
-          <h2 className="modal-title" style={{ fontSize: '0.9375rem', marginBottom: '1rem' }}>
-            Financials & Timeline
-          </h2>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem', fontSize: '0.8125rem' }}>
-            <div>
-              <span style={{ color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>Estimated Cost</span>
+        {/* Card: Financials & Timeline */}
+        <div className="project-detail-card">
+          <h2 className="project-card-heading">Financials &amp; Timeline</h2>
+          <div className="project-card-body">
+            <div className="project-field">
+              <span className="project-field-label">Estimated Cost</span>
               <span style={{ color: 'var(--status-active)', fontWeight: 600, fontSize: '1rem' }}>
                 {formatCurrency(project.estimatedCost)}
               </span>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginTop: '0.25rem' }}>
-              <div>
-                <span style={{ color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>Planned Start</span>
-                <span style={{ color: '#fff' }}>
-                  {project.plannedStartDate ? new Date(project.plannedStartDate).toLocaleDateString() : '—'}
+            <div className="project-field-row">
+              <div className="project-field">
+                <span className="project-field-label">Planned Start</span>
+                <span style={{ color: '#fff', fontSize: '0.8125rem' }}>
+                  {project.plannedStartDate
+                    ? new Date(project.plannedStartDate).toLocaleDateString('en-IN')
+                    : '—'}
                 </span>
               </div>
-              <div>
-                <span style={{ color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>Planned End</span>
-                <span style={{ color: '#fff' }}>
-                  {project.plannedEndDate ? new Date(project.plannedEndDate).toLocaleDateString() : '—'}
+              <div className="project-field">
+                <span className="project-field-label">Planned End</span>
+                <span style={{ color: '#fff', fontSize: '0.8125rem' }}>
+                  {project.plannedEndDate
+                    ? new Date(project.plannedEndDate).toLocaleDateString('en-IN')
+                    : '—'}
                 </span>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Audit & Ownership */}
-        <div className="detail-panel-card" style={{ gridColumn: '1 / -1' }}>
-          <h2 className="modal-title" style={{ fontSize: '0.9375rem', marginBottom: '1rem' }}>
-            Governance & Audit Trail
-          </h2>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', fontSize: '0.8125rem' }}>
-            <div>
-              <span style={{ color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>Created By</span>
-              <span style={{ color: '#fff' }}>
+        {/* Card: Governance & Audit Trail — full width */}
+        <div className="project-detail-card project-detail-card--full">
+          <h2 className="project-card-heading">Governance &amp; Audit Trail</h2>
+          <div className="project-audit-grid">
+            <div className="project-field">
+              <span className="project-field-label">Created By</span>
+              <span style={{ color: '#fff', fontSize: '0.8125rem', wordBreak: 'break-word' }}>
                 {project.creator?.name} ({project.creator?.email})
               </span>
             </div>
-            <div>
-              <span style={{ color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>Creation Timestamp</span>
-              <span style={{ color: '#fff' }}>
-                {new Date(project.createdAt).toLocaleString()}
+            <div className="project-field">
+              <span className="project-field-label">Creation Timestamp</span>
+              <span style={{ color: '#fff', fontSize: '0.8125rem' }}>
+                {new Date(project.createdAt).toLocaleString('en-IN')}
               </span>
             </div>
-            <div>
-              <span style={{ color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>Last Updated</span>
-              <span style={{ color: '#fff' }}>
-                {new Date(project.updatedAt).toLocaleString()}
+            <div className="project-field">
+              <span className="project-field-label">Last Updated</span>
+              <span style={{ color: '#fff', fontSize: '0.8125rem' }}>
+                {new Date(project.updatedAt).toLocaleString('en-IN')}
               </span>
             </div>
           </div>
