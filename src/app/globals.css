@@ -2118,9 +2118,6 @@ body {
    ========================================================================== */
 
 /* Removes the narrow max-width constraint used in the old inline style */
-.project-details-page {
-  /* inherits users-page flex column layout */
-}
 
 /* Two-column responsive grid for project info cards */
 .project-details-grid {
