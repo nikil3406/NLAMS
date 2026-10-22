@@ -1,8 +1,13 @@
+import { db } from '../../../db';
 import {
   projectRepository,
   type ProjectFilterOptions,
   type ProjectWithRelations,
 } from '../../repositories/project.repository';
+import {
+  projectBoundaryRepository,
+} from '../../repositories/project-boundary.repository';
+import { projectBoundaryService } from './project-boundary.service';
 import { implementingAgencyService } from '../implementing-agencies/implementing-agency.service';
 import { permissionService } from '../authorization/permission.service';
 import { scopeService } from '../authorization/scope.service';
@@ -69,20 +74,49 @@ export class ProjectService {
     // 5. Generate concurrency-safe project code
     const projectCode = await projectRepository.generateProjectCode();
 
-    // 6. Create record in DRAFT status
-    const created = await projectRepository.createProject({
-      projectCode,
-      name: input.name,
-      description: input.description ?? null,
-      projectType: input.projectType,
-      implementingAgencyId: input.implementingAgencyId,
-      administrativeUnitId: input.administrativeUnitId,
-      createdBy: userId,
-      landAcquisitionRequired: input.landAcquisitionRequired ?? true,
-      estimatedCost: input.estimatedCost ?? null,
-      plannedStartDate: input.plannedStartDate ?? null,
-      plannedEndDate: input.plannedEndDate ?? null,
-      status: 'DRAFT',
+    // 6. Pre-validate and measure geometry if boundary is provided
+    let measurement: { areaSqm: number } | null = null;
+    if (input.boundary) {
+      measurement = await projectBoundaryService.validateAndMeasureGeometry(input.boundary.geometry);
+    }
+
+    // 7. Create project and initial boundary version transactionally
+    const created = await db.transaction(async (tx) => {
+      const project = await projectRepository.createProject(
+        {
+          projectCode,
+          name: input.name,
+          description: input.description ?? null,
+          projectType: input.projectType,
+          implementingAgencyId: input.implementingAgencyId,
+          administrativeUnitId: input.administrativeUnitId,
+          createdBy: userId,
+          landAcquisitionRequired: input.landAcquisitionRequired ?? true,
+          estimatedCost: input.estimatedCost ?? null,
+          plannedStartDate: input.plannedStartDate ?? null,
+          plannedEndDate: input.plannedEndDate ?? null,
+          status: 'DRAFT',
+        },
+        tx
+      );
+
+      if (input.boundary && measurement) {
+        await projectBoundaryRepository.createBoundaryVersion(
+          {
+            projectId: project.id,
+            versionNumber: 1,
+            geometry: input.boundary.geometry,
+            estimatedLandArea: input.boundary.estimatedLandArea,
+            estimatedAreaUnit: input.boundary.estimatedAreaUnit,
+            calculatedGeometryArea: measurement.areaSqm.toFixed(2),
+            createdBy: userId,
+            changeReason: input.boundary.changeReason ?? 'Initial project boundary',
+          },
+          tx
+        );
+      }
+
+      return project;
     });
 
     const detailed = await projectRepository.findProjectById(created.id);

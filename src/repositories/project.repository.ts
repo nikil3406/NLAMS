@@ -10,6 +10,10 @@ import {
 import { implementingAgencies, type ImplementingAgency } from '../../db/schema/implementing-agencies';
 import { administrativeUnits, type AdministrativeUnit } from '../../db/schema/administrative-units';
 import { users } from '../../db/schema/users';
+import {
+  projectBoundaryRepository,
+  type BoundaryRecord,
+} from './project-boundary.repository';
 
 export interface ProjectFilterOptions {
   search?: string;
@@ -30,6 +34,7 @@ export interface ProjectWithRelations extends Project {
     name: string;
     email: string;
   };
+  boundary?: BoundaryRecord | null;
 }
 
 export class ProjectRepository {
@@ -65,8 +70,12 @@ export class ProjectRepository {
   /**
    * Creates a new project record.
    */
-  async createProject(data: NewProject): Promise<Project> {
-    const [project] = await db
+  async createProject(
+    data: NewProject,
+    txClient?: Parameters<Parameters<typeof db.transaction>[0]>[0]
+  ): Promise<Project> {
+    const executor = (txClient ?? db) as typeof db;
+    const [project] = await executor
       .insert(projects)
       .values(data)
       .returning();
@@ -100,11 +109,14 @@ export class ProjectRepository {
       return null;
     }
 
+    const boundary = await projectBoundaryRepository.findLatestBoundaryByProjectId(id);
+
     return {
       ...row.project,
       implementingAgency: row.agency,
       administrativeUnit: row.adminUnit,
       creator: row.creator,
+      boundary,
     };
   }
 

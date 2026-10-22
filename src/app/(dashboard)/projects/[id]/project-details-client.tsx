@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import type { ProjectWithRelations } from '../../../../repositories/project.repository';
 import type { ProjectStatus } from '../../../../../db/schema/projects';
+import { ProjectBoundaryMap } from '../../../../components/maps/project-boundary-map';
 
 interface ProjectDetailsClientProps {
   projectId: string;
@@ -485,6 +486,99 @@ export function ProjectDetailsClient({
               </div>
             </div>
           </div>
+        </div>
+
+        {/* Card: Project Spatial Boundary — full width */}
+        <div className="project-detail-card project-detail-card--full" id="project-spatial-boundary-card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+            <h2 className="project-card-heading" style={{ margin: 0 }}>Project Spatial Boundary &amp; Alignment</h2>
+            {project.boundary && (
+              <span className="role-tag-badge" style={{ backgroundColor: 'var(--accent-subtle)', color: 'var(--accent-secondary)' }}>
+                Boundary Version {project.boundary.versionNumber}
+              </span>
+            )}
+          </div>
+
+          {project.boundary ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {/* Notice callout */}
+              <div
+                style={{
+                  backgroundColor: 'rgba(59, 130, 246, 0.08)',
+                  border: '1px solid rgba(59, 130, 246, 0.2)',
+                  borderRadius: '6px',
+                  padding: '0.75rem 1rem',
+                  fontSize: '0.8125rem',
+                  color: 'var(--text-secondary)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                }}
+              >
+                <span style={{ color: 'var(--status-warning)', fontWeight: 600 }}>Note:</span>
+                <span>
+                  This polygon represents an <strong>approximate project boundary / right-of-way corridor</strong> for preliminary planning. It is not an official parcel boundary.
+                </span>
+              </div>
+
+              {/* Map View */}
+              <ProjectBoundaryMap
+                initialGeometry={project.boundary.geometry}
+                readOnly={true}
+                height="380px"
+                adminUnitCode={project.administrativeUnit?.code}
+              />
+
+              {/* Spatial Metrics Row */}
+              <div className="project-audit-grid" style={{ marginTop: '0.5rem' }}>
+                <div className="project-field">
+                  <span className="project-field-label">Calculated Geometry Area</span>
+                  <strong style={{ color: 'var(--status-active)', fontSize: '0.9375rem' }}>
+                    {Number(project.boundary.calculatedGeometryArea).toLocaleString('en-IN', { maximumFractionDigits: 2 })} sq m
+                  </strong>
+                  <span style={{ fontSize: '0.6875rem', color: 'var(--text-muted)' }}>
+                    ({(Number(project.boundary.calculatedGeometryArea) / 10000).toFixed(4)} ha / {(Number(project.boundary.calculatedGeometryArea) / 4046.8564224).toFixed(4)} acres)
+                  </span>
+                </div>
+
+                <div className="project-field">
+                  <span className="project-field-label">Estimated Land Requirement</span>
+                  <strong style={{ color: '#fff', fontSize: '0.9375rem' }}>
+                    {project.boundary.estimatedLandArea} {project.boundary.estimatedAreaUnit}
+                  </strong>
+                  <span style={{ fontSize: '0.6875rem', color: 'var(--text-muted)' }}>
+                    Specified in project requisition
+                  </span>
+                </div>
+
+                <div className="project-field">
+                  <span className="project-field-label">Boundary Change Reason</span>
+                  <span style={{ color: 'var(--text-secondary)', fontSize: '0.8125rem' }}>
+                    {project.boundary.changeReason || 'Initial project boundary'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div
+              style={{
+                padding: '2rem',
+                textAlign: 'center',
+                backgroundColor: 'rgba(255, 255, 255, 0.02)',
+                borderRadius: '8px',
+                border: '1px dashed var(--border-color)',
+                color: 'var(--text-muted)',
+                fontSize: '0.875rem',
+              }}
+            >
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ margin: '0 auto 0.75rem', display: 'block', opacity: 0.6 }}>
+                <polygon points="12 2 2 7 12 12 22 7 12 2" />
+                <polyline points="2 17 12 22 22 17" />
+                <polyline points="2 12 12 17 22 12" />
+              </svg>
+              <span>No spatial boundary polygon has been recorded for this project yet.</span>
+            </div>
+          )}
         </div>
 
         {/* Card: Governance & Audit Trail — full width */}

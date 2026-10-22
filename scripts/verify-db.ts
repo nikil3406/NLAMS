@@ -92,6 +92,9 @@ async function verify() {
     'administrative_units',
     'user_assignments',
     'sessions',
+    'implementing_agencies',
+    'projects',
+    'project_boundary_versions',
   ];
 
   console.log('\n  Tables:');

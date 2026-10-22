@@ -9,3 +9,4 @@ export * from './user-assignments';
 export * from './sessions';
 export * from './implementing-agencies';
 export * from './projects';
+export * from './project-boundary-versions';

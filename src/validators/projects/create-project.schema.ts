@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { PROJECT_TYPES } from '../../../db/schema/projects';
+import { projectBoundaryInputSchema } from '../spatial/boundary.schema';
 
 export const createProjectSchema = z
   .object({
@@ -48,6 +49,7 @@ export const createProjectSchema = z
       .regex(/^\d{4}-\d{2}-\d{2}$/, { message: 'Planned end date must be in YYYY-MM-DD format' })
       .optional()
       .nullable(),
+    boundary: projectBoundaryInputSchema.optional().nullable(),
     // Client-supplied createdBy, projectCode, id, status, etc. are rejected
     createdBy: z
       .never({ invalid_type_error: 'Client cannot specify createdBy' })
