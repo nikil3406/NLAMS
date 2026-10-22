@@ -34,8 +34,6 @@ export function ProjectBoundaryMap({
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
   const drawInstanceRef = useRef<any>(null);
-  // DOM-based vertex markers — visible regardless of WebGL/worker state
-  const vertexMarkersRef = useRef<any[]>([]);
 
   const [isMapLoaded, setIsMapLoaded] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
@@ -48,12 +46,6 @@ export function ProjectBoundaryMap({
   const [serverAreaSqm, setServerAreaSqm] = useState<number | null>(null);
   const [isValidatingServer, setIsValidatingServer] = useState(false);
   const [activeDrawMode, setActiveDrawMode] = useState<'simple_select' | 'draw_polygon'>('simple_select');
-
-  // Clear all DOM vertex markers (safe to call at any time)
-  const clearVertexMarkers = useCallback(() => {
-    vertexMarkersRef.current.forEach((m) => m.remove());
-    vertexMarkersRef.current = [];
-  }, []);
 
   // Verify and measure area via server PostGIS
   const verifyServerArea = useCallback(async (geometry: GeoJsonGeometry | null) => {
@@ -114,14 +106,15 @@ export function ProjectBoundaryMap({
 
         if (isCancelled || !mapContainerRef.current) return;
 
-        // Fix: MapLibre GL JS 6.x uses an ES module worker (.mjs). Next.js dev
-        // server returns text/html for unknown module requests → worker fails →
-        // GeoJSON sources (including draw hot/cold) cannot render features.
-        // Serve the worker from /public where Next.js sets the correct MIME type.
+        // Correctly set MapLibre GL JS web worker URL so all GeoJSON sources & drawing layers function
         try {
-          (maplibregl as any).workerUrl = '/maplibre-gl-worker.mjs';
+          if (typeof (maplibregl as any).setWorkerUrl === 'function') {
+            (maplibregl as any).setWorkerUrl('/maplibre-gl-worker.mjs');
+          } else if ((maplibregl as any).config) {
+            (maplibregl as any).config.WORKER_URL = '/maplibre-gl-worker.mjs';
+          }
         } catch {
-          /* non-critical — map still renders raster tiles without worker */
+          /* non-critical fallback */
         }
 
         // Determine initial center and zoom based on adminUnitCode
@@ -168,15 +161,122 @@ export function ProjectBoundaryMap({
           setIsMapLoaded(true);
 
           if (!readOnly) {
-            // Initialize Drawing Plugin
+            // Custom modes ensuring ALL vertices are emitted with exact coordinates
+            // during drawing AND after double-click completion, without premature termination
+            const customModes = {
+              ...MapboxDraw.modes,
+              draw_polygon: {
+                ...MapboxDraw.modes.draw_polygon,
+                clickOnVertex(state: any, e: any) {
+                  // Only allow closing if we have at least 3 points placed AND the vertex clicked is the starting vertex '0.0'
+                  const isStartVertex = e?.featureTarget?.properties?.coord_path === '0.0';
+                  if (state.currentVertexPosition >= 2 && isStartVertex) {
+                    return (this as any).changeMode(MapboxDraw.constants.modes.SIMPLE_SELECT, {
+                      featureIds: [state.polygon.id],
+                    });
+                  }
+                  // Do not close or delete if fewer than 3 points are placed
+                  return (this as any).clickAnywhere(state, e);
+                },
+                clickAnywhere(state: any, e: any) {
+                  // Only allow double-click close if at least 3 points have been placed
+                  const isEventAtCoords = (MapboxDraw as any).lib.isEventAtCoordinates;
+                  if (
+                    state.currentVertexPosition >= 2 &&
+                    isEventAtCoords &&
+                    isEventAtCoords(e, state.polygon.coordinates[0][state.currentVertexPosition - 1])
+                  ) {
+                    return (this as any).changeMode(MapboxDraw.constants.modes.SIMPLE_SELECT, {
+                      featureIds: [state.polygon.id],
+                    });
+                  }
+                  (this as any).updateUIClasses({ mouse: MapboxDraw.constants.cursors.ADD });
+                  state.polygon.updateCoordinate(`0.${state.currentVertexPosition}`, e.lngLat.lng, e.lngLat.lat);
+                  state.currentVertexPosition++;
+                  state.polygon.updateCoordinate(`0.${state.currentVertexPosition}`, e.lngLat.lng, e.lngLat.lat);
+                },
+                toDisplayFeatures(state: any, geojson: any, display: any) {
+                  const isActivePolygon = geojson.properties.id === state.polygon.id;
+                  geojson.properties.active = isActivePolygon ? 'true' : 'false';
+                  if (!isActivePolygon) return display(geojson);
+
+                  if (geojson.geometry.coordinates.length === 0) return;
+
+                  const coordinateCount = geojson.geometry.coordinates[0].length;
+                  if (coordinateCount < 3) return;
+
+                  geojson.properties.meta = 'feature';
+
+                  // Emit start vertex with meta: 'vertex' (interactive target for closing)
+                  display((MapboxDraw as any).lib.createVertex(
+                    state.polygon.id,
+                    geojson.geometry.coordinates[0][0],
+                    '0.0',
+                    false
+                  ));
+
+                  // Emit all other fixed vertices with meta: 'vertex-display'
+                  // so they are visible on the map, but cannot be accidentally clicked as closing targets
+                  const numFixedPoints = coordinateCount - 1;
+                  for (let i = 1; i < numFixedPoints; i++) {
+                    display({
+                      type: 'Feature',
+                      properties: {
+                        meta: 'vertex-display',
+                        parent: state.polygon.id,
+                        coord_path: `0.${i}`,
+                        active: 'false',
+                      },
+                      geometry: {
+                        type: 'Point',
+                        coordinates: geojson.geometry.coordinates[0][i],
+                      },
+                    });
+                  }
+
+                  if (coordinateCount <= 4) {
+                    const lineCoordinates = [
+                      [geojson.geometry.coordinates[0][0][0], geojson.geometry.coordinates[0][0][1]],
+                      [geojson.geometry.coordinates[0][1][0], geojson.geometry.coordinates[0][1][1]],
+                    ];
+                    display({
+                      type: 'Feature',
+                      properties: geojson.properties,
+                      geometry: {
+                        coordinates: lineCoordinates,
+                        type: 'LineString',
+                      },
+                    });
+                    if (coordinateCount === 3) return;
+                  }
+
+                  return display(geojson);
+                },
+              },
+              simple_select: {
+                ...MapboxDraw.modes.simple_select,
+                toDisplayFeatures(state: any, geojson: any, display: any) {
+                  geojson.properties.active = (this as any).isSelected(geojson.properties.id) ? 'true' : 'false';
+                  display(geojson);
+                  (this as any).fireActionable();
+                  if (geojson.geometry.type === 'Point') return;
+                  // Always emit vertices for completed polygons so they remain visible after double-click
+                  const suppPoints = (MapboxDraw as any).lib.createSupplementaryPoints(geojson, { midpoints: false });
+                  suppPoints.forEach(display);
+                },
+              },
+            };
+
+            // Initialize Drawing Plugin with custom modes and styles
             const draw = new MapboxDraw({
               displayControlsDefault: false,
               controls: {
                 polygon: false,
                 trash: false,
               },
+              modes: customModes,
               styles: [
-                // === Polygon Fill (inactive) ===
+                // === Polygon Fill (completed / inactive) ===
                 {
                   id: 'gl-draw-polygon-fill-inactive',
                   type: 'fill',
@@ -195,10 +295,10 @@ export function ProjectBoundaryMap({
                   paint: {
                     'fill-color': '#3b82f6',
                     'fill-outline-color': '#60a5fa',
-                    'fill-opacity': 0.3,
+                    'fill-opacity': 0.25,
                   },
                 },
-                // === Polygon Stroke (inactive) ===
+                // === Polygon Stroke (completed / inactive) ===
                 {
                   id: 'gl-draw-polygon-stroke-inactive',
                   type: 'line',
@@ -206,79 +306,89 @@ export function ProjectBoundaryMap({
                   layout: { 'line-cap': 'round', 'line-join': 'round' },
                   paint: {
                     'line-color': '#2563eb',
-                    'line-width': 2,
+                    'line-width': 2.5,
                   },
                 },
-                // === Polygon Stroke (active) ===
+                // === Polygon Stroke (active / being drawn) ===
                 {
                   id: 'gl-draw-polygon-stroke-active',
                   type: 'line',
                   filter: ['all', ['==', 'active', 'true'], ['==', '$type', 'Polygon']],
                   layout: { 'line-cap': 'round', 'line-join': 'round' },
                   paint: {
-                    'line-color': '#60a5fa',
+                    'line-color': '#2563eb',
                     'line-dasharray': [0.2, 2],
                     'line-width': 2.5,
                   },
                 },
-                // === Line (active guide line while drawing) ===
+                // === Line (rubberband guide line while drawing) ===
                 {
                   id: 'gl-draw-line-active',
                   type: 'line',
                   filter: ['all', ['==', '$type', 'LineString'], ['==', 'active', 'true']],
                   layout: { 'line-cap': 'round', 'line-join': 'round' },
                   paint: {
-                    'line-color': '#60a5fa',
+                    'line-color': '#2563eb',
                     'line-dasharray': [0.2, 2],
-                    'line-width': 2,
+                    'line-width': 2.5,
                   },
                 },
-                // === Midpoints (orange dots between vertices for editing) ===
+                // === Midpoints (orange dot between vertices if editing) ===
                 {
                   id: 'gl-draw-polygon-midpoint',
                   type: 'circle',
                   filter: ['all', ['==', '$type', 'Point'], ['==', 'meta', 'midpoint']],
                   paint: {
-                    'circle-radius': 4,
+                    'circle-radius': 4.5,
                     'circle-color': '#f97316',
-                    'circle-stroke-width': 1.5,
-                    'circle-stroke-color': '#fff',
-                  },
-                },
-                // === Vertex Points (inactive polygon, white circle with blue ring) ===
-                {
-                  id: 'gl-draw-polygon-and-line-vertex-inactive',
-                  type: 'circle',
-                  filter: ['all', ['==', 'meta', 'vertex'], ['==', '$type', 'Point'], ['!=', 'mode', 'static']],
-                  paint: {
-                    'circle-radius': 5,
-                    'circle-color': '#fff',
                     'circle-stroke-width': 2,
-                    'circle-stroke-color': '#2563eb',
+                    'circle-stroke-color': '#ffffff',
                   },
                 },
-                // === Selected / Hot Vertex (blue filled, white ring) ===
+                // === First Vertex Highlight (start point to click for closing) ===
                 {
-                  id: 'gl-draw-polygon-and-line-vertex-stroke-inactive',
+                  id: 'gl-draw-first-vertex-highlight',
                   type: 'circle',
-                  filter: ['all', ['==', 'meta', 'vertex'], ['==', '$type', 'Point'], ['!=', 'mode', 'static']],
+                  filter: ['all', ['==', 'meta', 'vertex'], ['==', 'coord_path', '0.0'], ['==', 'mode', 'draw_polygon']],
                   paint: {
-                    'circle-radius': 7,
-                    'circle-color': '#60a5fa',
-                    'circle-stroke-width': 2,
-                    'circle-stroke-color': '#1e3a5f',
+                    'circle-radius': 8.5,
+                    'circle-color': '#16a34a',
+                    'circle-stroke-width': 2.5,
+                    'circle-stroke-color': '#ffffff',
                   },
                 },
-                // === Active drawing point (cursor snapping dot) ===
+                // === Vertex Points Outer Ring (visible while drawing AND after completion) ===
                 {
-                  id: 'gl-draw-point-point-stroke-active',
+                  id: 'gl-draw-polygon-vertex-outer',
                   type: 'circle',
-                  filter: ['all', ['==', '$type', 'Point'], ['==', 'active', 'true'], ['!=', 'meta', 'midpoint']],
+                  filter: ['all', ['in', 'meta', 'vertex', 'vertex-display'], ['==', '$type', 'Point']],
                   paint: {
-                    'circle-radius': 8,
+                    'circle-radius': 6.5,
                     'circle-color': '#ffffff',
-                    'circle-stroke-width': 3,
+                    'circle-stroke-width': 2.5,
                     'circle-stroke-color': '#2563eb',
+                  },
+                },
+                // === Vertex Points Inner Core (crisp center pin) ===
+                {
+                  id: 'gl-draw-polygon-vertex-inner',
+                  type: 'circle',
+                  filter: ['all', ['in', 'meta', 'vertex', 'vertex-display'], ['==', '$type', 'Point']],
+                  paint: {
+                    'circle-radius': 3,
+                    'circle-color': '#2563eb',
+                  },
+                },
+                // === Active Drawing Cursor Dot ===
+                {
+                  id: 'gl-draw-point-stroke-active',
+                  type: 'circle',
+                  filter: ['all', ['==', '$type', 'Point'], ['==', 'active', 'true'], ['!=', 'meta', 'midpoint'], ['!=', 'meta', 'vertex']],
+                  paint: {
+                    'circle-radius': 6,
+                    'circle-color': '#2563eb',
+                    'circle-stroke-width': 2.5,
+                    'circle-stroke-color': '#ffffff',
                   },
                 },
               ],
@@ -289,7 +399,7 @@ export function ProjectBoundaryMap({
 
             // Load initial geometry into draw if provided
             if (initialGeometry) {
-              const featureId = draw.add({
+              draw.add({
                 type: 'Feature',
                 properties: {},
                 geometry: initialGeometry as any,
@@ -302,36 +412,6 @@ export function ProjectBoundaryMap({
                 /* ignore */
               }
             }
-
-            // ─── DOM Vertex Markers ────────────────────────────────────────────
-            // MapboxDraw only emits 1-2 vertex GeoJSON features during drawing
-            // AND the hot GeoJSON source requires a working WebGL worker to
-            // render. Both issues are bypassed by placing maplibregl.Marker
-            // objects (positioned <div> elements) on every map click while in
-            // draw_polygon mode. They are always visible irrespective of worker
-            // or WebGL state.
-
-            const addVertexMarker = (lngLat: [number, number]) => {
-              const el = document.createElement('div');
-              el.style.cssText = [
-                'width:12px', 'height:12px', 'border-radius:50%',
-                'background:#ffffff', 'border:2.5px solid #2563eb',
-                'box-shadow:0 0 0 3px rgba(37,99,235,0.3),0 1px 4px rgba(0,0,0,0.5)',
-                'pointer-events:none', 'position:relative', 'z-index:10',
-              ].join(';');
-              const marker = new (maplibregl as any).Marker({ element: el, anchor: 'center' })
-                .setLngLat(lngLat)
-                .addTo(map);
-              vertexMarkersRef.current.push(marker);
-            };
-
-            // Attach click listener — fires AFTER MapboxDraw processes the click
-            const handleMapClickForVertex = (e: any) => {
-              if (drawInstanceRef.current?.getMode?.() === 'draw_polygon') {
-                addVertexMarker([e.lngLat.lng, e.lngLat.lat]);
-              }
-            };
-            map.on('click', handleMapClickForVertex);
 
             // ─── Draw event listeners ─────────────────────────────────────────
             const syncDraw = () => {
@@ -348,22 +428,11 @@ export function ProjectBoundaryMap({
               }
             };
 
-            (map as any).on('draw.create', () => {
-              // Polygon completed — DOM markers served their purpose, remove them
-              clearVertexMarkers();
-              syncDraw();
-            });
+            (map as any).on('draw.create', syncDraw);
             (map as any).on('draw.update', syncDraw);
-            (map as any).on('draw.delete', () => {
-              clearVertexMarkers();
-              syncDraw();
-            });
+            (map as any).on('draw.delete', syncDraw);
             (map as any).on('draw.modechange', (e: any) => {
               setActiveDrawMode(e.mode);
-              // Clean up markers whenever we leave draw_polygon mode
-              if (e.mode !== 'draw_polygon') {
-                clearVertexMarkers();
-              }
             });
           } else {
             // Read-only mode: render geometry layer directly
@@ -397,6 +466,49 @@ export function ProjectBoundaryMap({
                 },
               });
 
+              // Also render vertices in read-only mode
+              const coords =
+                initialGeometry.type === 'Polygon'
+                  ? initialGeometry.coordinates[0]
+                  : initialGeometry.type === 'MultiPolygon'
+                  ? initialGeometry.coordinates[0][0]
+                  : [];
+              if (coords.length > 0) {
+                map.addSource('readonly-vertices', {
+                  type: 'geojson',
+                  data: {
+                    type: 'FeatureCollection',
+                    features: coords.slice(0, -1).map((pt: any) => ({
+                      type: 'Feature',
+                      properties: {},
+                      geometry: { type: 'Point', coordinates: pt },
+                    })),
+                  },
+                });
+
+                map.addLayer({
+                  id: 'readonly-vertices-outer',
+                  type: 'circle',
+                  source: 'readonly-vertices',
+                  paint: {
+                    'circle-radius': 6.5,
+                    'circle-color': '#ffffff',
+                    'circle-stroke-width': 2.5,
+                    'circle-stroke-color': '#2563eb',
+                  },
+                });
+
+                map.addLayer({
+                  id: 'readonly-vertices-inner',
+                  type: 'circle',
+                  source: 'readonly-vertices',
+                  paint: {
+                    'circle-radius': 3,
+                    'circle-color': '#2563eb',
+                  },
+                });
+              }
+
               fitGeometryBounds(map, initialGeometry);
             }
           }
@@ -412,7 +524,6 @@ export function ProjectBoundaryMap({
 
     return () => {
       isCancelled = true;
-      clearVertexMarkers();
       if (mapInstanceRef.current) {
         mapInstanceRef.current.remove();
         mapInstanceRef.current = null;
@@ -457,7 +568,6 @@ export function ProjectBoundaryMap({
   // Draw controls actions
   const handleStartDraw = () => {
     if (!drawInstanceRef.current) return;
-    clearVertexMarkers(); // Remove any leftover vertex dots from a previous draw
     drawInstanceRef.current.deleteAll();
     drawInstanceRef.current.changeMode('draw_polygon');
     setActiveDrawMode('draw_polygon');
@@ -466,7 +576,6 @@ export function ProjectBoundaryMap({
 
   const handleClear = () => {
     if (!drawInstanceRef.current) return;
-    clearVertexMarkers(); // Remove vertex dots
     drawInstanceRef.current.deleteAll();
     handleGeometryUpdate(null);
     setActiveDrawMode('simple_select');
