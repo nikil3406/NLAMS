@@ -83,6 +83,10 @@ const PERMISSIONS = [
   { name: 'PROJECT_CREATE',    description: 'Create new infrastructure projects' },
   { name: 'PROJECT_UPDATE',    description: 'Update existing project details' },
   { name: 'PROJECT_REGISTER',  description: 'Formally register draft projects' },
+  { name: 'ACQUISITION_CASE_VIEW',   description: 'View acquisition cases and details' },
+  { name: 'ACQUISITION_CASE_CREATE', description: 'Create draft acquisition cases' },
+  { name: 'ACQUISITION_CASE_UPDATE', description: 'Update draft or returned acquisition cases' },
+  { name: 'ACQUISITION_CASE_SUBMIT', description: 'Submit acquisition cases for review' },
 ] as const;
 
 type PermissionName = typeof PERMISSIONS[number]['name'];
@@ -93,19 +97,28 @@ const ROLE_PERMISSIONS: Record<string, PermissionName[]> = {
     'ROLE_VIEW', 'ROLE_ASSIGN',
     'ADMIN_UNIT_VIEW', 'ADMIN_UNIT_CREATE', 'ADMIN_UNIT_UPDATE',
     'PROJECT_VIEW', 'PROJECT_CREATE', 'PROJECT_UPDATE', 'PROJECT_REGISTER',
+    'ACQUISITION_CASE_VIEW', 'ACQUISITION_CASE_CREATE', 'ACQUISITION_CASE_UPDATE', 'ACQUISITION_CASE_SUBMIT',
   ],
   MINISTRY_ADMIN: [
     'USER_VIEW', 'USER_CREATE', 'USER_UPDATE', 'USER_ASSIGN',
     'ROLE_VIEW', 'ROLE_ASSIGN',
     'ADMIN_UNIT_VIEW', 'ADMIN_UNIT_CREATE', 'ADMIN_UNIT_UPDATE',
     'PROJECT_VIEW', 'PROJECT_CREATE', 'PROJECT_UPDATE', 'PROJECT_REGISTER',
+    'ACQUISITION_CASE_VIEW', 'ACQUISITION_CASE_CREATE', 'ACQUISITION_CASE_UPDATE', 'ACQUISITION_CASE_SUBMIT',
   ],
   PROJECT_OFFICER: [
     'USER_VIEW', 'ROLE_VIEW', 'ADMIN_UNIT_VIEW',
     'PROJECT_VIEW', 'PROJECT_CREATE', 'PROJECT_UPDATE', 'PROJECT_REGISTER',
+    'ACQUISITION_CASE_VIEW',
   ],
-  LAND_OFFICER:    ['USER_VIEW', 'ROLE_VIEW', 'ADMIN_UNIT_VIEW', 'PROJECT_VIEW'],
-  FIELD_OFFICER:   ['USER_VIEW', 'ADMIN_UNIT_VIEW', 'PROJECT_VIEW'],
+  LAND_OFFICER: [
+    'USER_VIEW', 'ROLE_VIEW', 'ADMIN_UNIT_VIEW', 'PROJECT_VIEW',
+    'ACQUISITION_CASE_VIEW', 'ACQUISITION_CASE_CREATE', 'ACQUISITION_CASE_UPDATE', 'ACQUISITION_CASE_SUBMIT',
+  ],
+  FIELD_OFFICER: [
+    'USER_VIEW', 'ADMIN_UNIT_VIEW', 'PROJECT_VIEW',
+    'ACQUISITION_CASE_VIEW',
+  ],
 };
 
 // Development-only administrative hierarchy

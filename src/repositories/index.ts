@@ -6,3 +6,4 @@ export * from './administrative-unit.repository';
 export * from './user-assignment.repository';
 export * from './implementing-agency.repository';
 export * from './project.repository';
+export * from './acquisition-case.repository';

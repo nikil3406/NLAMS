@@ -37,6 +37,12 @@ const PERMISSION_CATEGORIES: Record<string, string[]> = {
   'Role Management': ['ROLE_VIEW', 'ROLE_ASSIGN'],
   'Administrative Units': ['ADMIN_UNIT_VIEW', 'ADMIN_UNIT_CREATE', 'ADMIN_UNIT_UPDATE'],
   'Project Management': ['PROJECT_VIEW', 'PROJECT_CREATE', 'PROJECT_UPDATE', 'PROJECT_REGISTER'],
+  'Acquisition Cases': [
+    'ACQUISITION_CASE_VIEW',
+    'ACQUISITION_CASE_CREATE',
+    'ACQUISITION_CASE_UPDATE',
+    'ACQUISITION_CASE_SUBMIT',
+  ],
 };
 
 
