@@ -72,7 +72,7 @@ export function AcquisitionCasesClient({
       const res = await fetch(`/api/acquisition-cases?${params.toString()}`);
       if (!res.ok) {
         if (res.status === 403) {
-          throw new Error('You do not have permission to view acquisition cases.');
+          throw new Error('You do not have permission to view acquisition cases in this scope.');
         }
         throw new Error('Failed to load acquisition cases.');
       }
@@ -111,34 +111,36 @@ export function AcquisitionCasesClient({
   };
 
   return (
-    <div className="users-page-container">
+    <div className="users-page">
       {/* Page Header */}
-      <div className="users-page-header">
+      <div className="page-header-row">
         <div>
-          <h1 className="users-page-title">Acquisition Cases</h1>
-          <p className="users-page-subtitle">
+          <h1 className="page-title">Acquisition Cases</h1>
+          <p className="page-subtitle">
             Manage land acquisition cases linked to infrastructure projects within your administrative scope.
           </p>
         </div>
         {canCreate && (
-          <Link
-            href="/acquisition-cases/new"
-            className="btn-primary"
-            id="create-case-btn"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            New Acquisition Case
-          </Link>
+          <div className="page-actions-group">
+            <Link
+              href="/acquisition-cases/new"
+              className="btn-primary"
+              id="create-case-btn"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              <span>New Acquisition Case</span>
+            </Link>
+          </div>
         )}
       </div>
 
       {/* Filter and Search Bar */}
       <form onSubmit={handleSearchSubmit} className="users-filter-bar">
-        <div className="users-search-box">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <div className="cases-search-wrapper">
+          <svg className="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <circle cx="11" cy="11" r="8" />
             <line x1="21" y1="21" x2="16.65" y2="16.65" />
           </svg>
@@ -147,28 +149,50 @@ export function AcquisitionCasesClient({
             placeholder="Search by case reference, title, project name or code..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="users-search-input"
+            className="search-input"
             id="cases-search-input"
+            style={{ height: '38px' }}
           />
+          {searchTerm && (
+            <button
+              type="button"
+              className="search-clear-btn"
+              onClick={() => {
+                setSearchTerm('');
+                setPage(1);
+              }}
+              title="Clear search"
+            >
+              ✕
+            </button>
+          )}
         </div>
 
-        <select
-          value={statusFilter}
-          onChange={(e) => {
-            setStatusFilter(e.target.value);
-            setPage(1);
-          }}
-          className="users-filter-select"
-          id="cases-status-filter"
-        >
-          <option value="">All Statuses</option>
-          <option value="DRAFT">Draft</option>
-          <option value="SUBMITTED">Submitted for Review</option>
-          <option value="RETURNED_FOR_CORRECTION">Returned for Correction</option>
-          <option value="REJECTED">Rejected</option>
-        </select>
+        <div className="filter-item">
+          <select
+            value={statusFilter}
+            onChange={(e) => {
+              setStatusFilter(e.target.value);
+              setPage(1);
+            }}
+            className="filter-select"
+            id="cases-status-filter"
+            style={{ height: '38px', minWidth: '180px' }}
+          >
+            <option value="">All Statuses</option>
+            <option value="DRAFT">Draft</option>
+            <option value="SUBMITTED">Submitted for Review</option>
+            <option value="RETURNED_FOR_CORRECTION">Returned for Correction</option>
+            <option value="REJECTED">Rejected</option>
+          </select>
+        </div>
 
-        <button type="submit" className="btn-secondary" style={{ whiteSpace: 'nowrap' }}>
+        <button
+          type="submit"
+          className="btn-secondary"
+          style={{ height: '38px', whiteSpace: 'nowrap' }}
+          id="btn-filter-cases"
+        >
           Filter
         </button>
 
@@ -176,8 +200,9 @@ export function AcquisitionCasesClient({
           <button
             type="button"
             onClick={handleResetFilters}
-            className="btn-ghost"
-            style={{ whiteSpace: 'nowrap' }}
+            className="btn-cancel"
+            style={{ height: '38px', whiteSpace: 'nowrap' }}
+            id="btn-reset-cases"
           >
             Reset
           </button>
@@ -196,24 +221,28 @@ export function AcquisitionCasesClient({
         </div>
       )}
 
-      {/* Cases Table */}
+      {/* Cases Table Container */}
       <div className="users-table-container">
         {isLoading ? (
           <div className="empty-state-card">
             <span className="spinner-sm" />
-            <span>Loading acquisition cases in authorized scope...</span>
+            <span>Loading acquisition cases in authorized administrative scope...</span>
           </div>
         ) : cases.length === 0 ? (
           <div className="empty-state-card" id="cases-empty-state">
             <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
               <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
             </svg>
-            <p style={{ fontWeight: 600, color: '#fff' }}>No acquisition cases found</p>
-            <p style={{ fontSize: '0.8125rem' }}>
+            <p style={{ fontWeight: 600, color: '#fff', fontSize: '0.9375rem' }}>No acquisition cases found</p>
+            <p style={{ fontSize: '0.8125rem', maxWidth: '420px', lineHeight: 1.5 }}>
               No cases match the selected filter criteria or administrative scope.
             </p>
             {canCreate && (
-              <Link href="/acquisition-cases/new" className="btn-primary" style={{ marginTop: '0.75rem' }}>
+              <Link href="/acquisition-cases/new" className="btn-primary" style={{ marginTop: '0.5rem' }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
                 Create First Acquisition Case
               </Link>
             )}
@@ -221,11 +250,20 @@ export function AcquisitionCasesClient({
         ) : (
           <>
             <div className="users-table-scroll">
-              <table className="users-table">
+              <table className="users-table cases-table">
+                <colgroup>
+                  <col className="col-case-ref" />
+                  <col className="col-case-title" />
+                  <col className="col-case-project" />
+                  <col className="col-case-unit" />
+                  <col className="col-case-status" />
+                  <col className="col-case-created" />
+                  <col className="col-case-actions" />
+                </colgroup>
                 <thead>
                   <tr>
                     <th>Case Reference</th>
-                    <th>Title & Description</th>
+                    <th>Title &amp; Description</th>
                     <th>Linked Project</th>
                     <th>Administrative Unit</th>
                     <th>Status</th>
@@ -245,24 +283,42 @@ export function AcquisitionCasesClient({
                     return (
                       <tr key={c.id} id={`case-row-${c.id}`}>
                         <td>
-                          <span style={{ fontFamily: 'monospace', fontWeight: 600, color: '#60a5fa' }}>
+                          <span
+                            style={{
+                              fontFamily: 'var(--font-mono, monospace)',
+                              fontWeight: 600,
+                              color: 'var(--accent-secondary, #60a5fa)',
+                              whiteSpace: 'nowrap',
+                              fontSize: '0.8125rem',
+                            }}
+                          >
                             {c.caseReference}
                           </span>
                         </td>
                         <td>
-                          <div>
-                            <span style={{ fontWeight: 600, color: '#fff', display: 'block' }}>
+                          <div style={{ minWidth: 0 }}>
+                            <span
+                              style={{
+                                fontWeight: 600,
+                                color: '#fff',
+                                display: 'block',
+                                wordBreak: 'break-word',
+                                lineHeight: 1.35,
+                              }}
+                            >
                               {c.title}
                             </span>
                             {c.description && (
                               <span
                                 style={{
                                   fontSize: '0.75rem',
-                                  color: '#94a3b8',
+                                  color: 'var(--text-muted)',
                                   display: '-webkit-box',
-                                  WebkitLineClamp: 1,
+                                  WebkitLineClamp: 2,
                                   WebkitBoxOrient: 'vertical',
                                   overflow: 'hidden',
+                                  marginTop: '0.25rem',
+                                  lineHeight: 1.35,
                                 }}
                               >
                                 {c.description}
@@ -271,18 +327,46 @@ export function AcquisitionCasesClient({
                           </div>
                         </td>
                         <td>
-                          <div>
-                            <span style={{ fontWeight: 500, color: '#e2e8f0', display: 'block' }}>
+                          <div style={{ minWidth: 0 }}>
+                            <span
+                              style={{
+                                fontWeight: 500,
+                                color: 'var(--text-primary)',
+                                display: 'block',
+                                wordBreak: 'break-word',
+                                lineHeight: 1.35,
+                              }}
+                            >
                               {c.project.name}
                             </span>
-                            <span style={{ fontSize: '0.75rem', color: '#64748b', fontFamily: 'monospace' }}>
+                            <span
+                              style={{
+                                fontSize: '0.75rem',
+                                color: 'var(--text-muted)',
+                                fontFamily: 'var(--font-mono, monospace)',
+                                whiteSpace: 'nowrap',
+                                display: 'block',
+                                marginTop: '0.125rem',
+                              }}
+                            >
                               {c.project.projectCode}
                             </span>
                           </div>
                         </td>
                         <td>
-                          <span style={{ fontSize: '0.8125rem', color: '#cbd5e1' }}>
-                            {c.project.administrativeUnit?.name} ({c.project.administrativeUnit?.code})
+                          <span
+                            style={{
+                              fontSize: '0.8125rem',
+                              color: 'var(--text-secondary)',
+                              display: 'block',
+                              wordBreak: 'break-word',
+                              lineHeight: 1.35,
+                            }}
+                          >
+                            {c.project.administrativeUnit?.name}{' '}
+                            <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                              ({c.project.administrativeUnit?.code})
+                            </span>
                           </span>
                         </td>
                         <td>
@@ -290,32 +374,44 @@ export function AcquisitionCasesClient({
                             style={{
                               display: 'inline-flex',
                               alignItems: 'center',
-                              padding: '2px 8px',
-                              borderRadius: '4px',
-                              fontSize: '0.75rem',
-                              fontWeight: 600,
+                              padding: '0.25rem 0.625rem',
+                              borderRadius: '9999px',
+                              fontSize: '0.6875rem',
+                              fontWeight: 700,
+                              textTransform: 'uppercase',
+                              letterSpacing: '0.04em',
                               backgroundColor: badge.bg,
                               color: badge.color,
                               border: `1px solid ${badge.border}`,
+                              whiteSpace: 'nowrap',
                             }}
                           >
                             {badge.label}
                           </span>
                         </td>
                         <td>
-                          <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
                             <span>{new Date(c.createdAt).toLocaleDateString()}</span>
-                            <span style={{ display: 'block', color: '#64748b' }}>by {c.creator.name}</span>
+                            <span
+                              style={{
+                                display: 'block',
+                                color: 'var(--text-muted)',
+                                fontSize: '0.6875rem',
+                                marginTop: '0.125rem',
+                              }}
+                            >
+                              by {c.creator.name}
+                            </span>
                           </div>
                         </td>
-                        <td style={{ textAlign: 'right' }}>
+                        <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                           <Link
                             href={`/acquisition-cases/${c.id}`}
-                            className="btn-ghost"
-                            style={{ fontSize: '0.75rem', padding: '4px 10px' }}
+                            className="btn-secondary"
+                            style={{ padding: '0.35rem 0.65rem', fontSize: '0.75rem', whiteSpace: 'nowrap' }}
                             id={`view-case-${c.id}`}
                           >
-                            View Details →
+                            View Details
                           </Link>
                         </td>
                       </tr>
@@ -325,33 +421,41 @@ export function AcquisitionCasesClient({
               </table>
             </div>
 
-            {/* Pagination */}
-            <div className="users-pagination">
+            {/* Pagination Footer */}
+            <div className="table-pagination-footer">
               <span className="pagination-info">
                 Showing {cases.length > 0 ? (page - 1) * limit + 1 : 0} to{' '}
-                {Math.min(page * limit, total)} of {total} cases
+                {Math.min(page * limit, total)} of {total} case{total !== 1 ? 's' : ''}
               </span>
-              <div className="pagination-controls">
+              <div className="pagination-btn-group" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <button
                   type="button"
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
                   disabled={page <= 1}
-                  className="btn-ghost"
+                  className="pagination-btn"
                   id="cases-prev-page"
                 >
-                  Previous
+                  ← Previous
                 </button>
-                <span className="pagination-page">
+                <span
+                  style={{
+                    fontSize: '0.8125rem',
+                    color: 'var(--text-secondary)',
+                    padding: '0 0.5rem',
+                    fontWeight: 600,
+                    whiteSpace: 'nowrap',
+                  }}
+                >
                   Page {page} of {totalPages}
                 </span>
                 <button
                   type="button"
                   onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                   disabled={page >= totalPages}
-                  className="btn-ghost"
+                  className="pagination-btn"
                   id="cases-next-page"
                 >
-                  Next
+                  Next →
                 </button>
               </div>
             </div>

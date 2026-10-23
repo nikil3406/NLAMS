@@ -32,7 +32,7 @@ export function NewAcquisitionCaseClient({}: NewAcquisitionCaseClientProps) {
       try {
         const res = await fetch('/api/projects?limit=100');
         if (!res.ok) {
-          throw new Error('Failed to load accessible projects');
+          throw new Error('Failed to load accessible projects in your administrative scope');
         }
         const json = await res.json();
         if (json.success) {
@@ -62,7 +62,7 @@ export function NewAcquisitionCaseClient({}: NewAcquisitionCaseClientProps) {
     setFormError(null);
 
     if (!selectedProjectId) {
-      setFormError('Please select a project for this acquisition case.');
+      setFormError('Please select an infrastructure project for this acquisition case.');
       return;
     }
 
@@ -98,187 +98,312 @@ export function NewAcquisitionCaseClient({}: NewAcquisitionCaseClientProps) {
   };
 
   return (
-    <div className="users-page-container" style={{ maxWidth: '800px', margin: '0 auto' }}>
-      {/* Header */}
-      <div style={{ marginBottom: '1.5rem' }}>
+    <div style={{ maxWidth: '860px', margin: '0 auto', width: '100%', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      {/* Page Header and Breadcrumb */}
+      <div>
         <Link
           href="/acquisition-cases"
           style={{
             fontSize: '0.8125rem',
-            color: '#94a3b8',
+            color: 'var(--text-secondary)',
             display: 'inline-flex',
             alignItems: 'center',
             gap: '0.375rem',
             marginBottom: '0.75rem',
             textDecoration: 'none',
+            fontWeight: 500,
           }}
         >
           ← Back to Acquisition Cases
         </Link>
-        <h1 className="users-page-title">Initiate Acquisition Case</h1>
-        <p className="users-page-subtitle">
-          Establish the formal land acquisition file linked to an approved infrastructure project.
+        <h1 className="page-title">Initiate Acquisition Case</h1>
+        <p className="page-subtitle" style={{ marginTop: '0.375rem' }}>
+          Establish the formal land acquisition file linked to an approved infrastructure project within your authorized administrative scope.
         </p>
       </div>
 
-      {/* Information Banner */}
+      {/* Workflow Explanatory Notice */}
       <div
         style={{
-          background: 'rgba(59, 130, 246, 0.08)',
+          backgroundColor: 'rgba(59, 130, 246, 0.08)',
           border: '1px solid rgba(59, 130, 246, 0.25)',
-          borderRadius: '8px',
-          padding: '1rem',
-          marginBottom: '1.5rem',
-          fontSize: '0.875rem',
-          color: '#93c5fd',
-          lineHeight: '1.5',
+          borderRadius: '10px',
+          padding: '1rem 1.25rem',
+          display: 'flex',
+          gap: '0.75rem',
+          alignItems: 'flex-start',
         }}
       >
-        <strong>Workflow Stage 1: Draft Foundation</strong>
-        <p style={{ marginTop: '0.25rem', color: '#bfdbfe', fontSize: '0.8125rem' }}>
-          This action creates an acquisition case in <strong>DRAFT</strong> status. A unique concurrency-safe case reference
-          will be assigned automatically. Once initialized, the case can be prepared and submitted for official review.
-        </p>
+        <svg
+          width="20"
+          height="20"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="var(--accent-secondary, #60a5fa)"
+          strokeWidth="2"
+          style={{ flexShrink: 0, marginTop: '2px' }}
+        >
+          <circle cx="12" cy="12" r="10" />
+          <line x1="12" y1="16" x2="12" y2="12" />
+          <line x1="12" y1="8" x2="12.01" y2="8" />
+        </svg>
+        <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+          <strong style={{ color: '#fff', display: 'block', marginBottom: '0.25rem' }}>
+            Workflow Stage 1: Case Draft Foundation
+          </strong>
+          This action creates an acquisition case in <strong style={{ color: '#93c5fd' }}>DRAFT</strong> status. A unique concurrency-safe case reference is assigned automatically. The case references the linked project directly without duplicate geometry. Once initialized, the case can be prepared and submitted for official review.
+        </div>
       </div>
 
       {loadError && (
-        <div className="alert-banner-error" role="alert" style={{ marginBottom: '1.5rem' }}>
+        <div className="alert-banner-error" role="alert">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
           <span>{loadError}</span>
         </div>
       )}
 
       {formError && (
-        <div className="alert-banner-error" role="alert" style={{ marginBottom: '1.5rem' }} id="create-case-error">
+        <div className="alert-banner-error" role="alert" id="create-case-error">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
           <span>{formError}</span>
         </div>
       )}
 
       {isLoadingProjects ? (
-        <div className="empty-state-card">
+        <div className="empty-state-card" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '14px' }}>
           <span className="spinner-sm" />
-          <span>Loading accessible projects...</span>
+          <span>Loading accessible projects in your administrative scope...</span>
         </div>
       ) : projects.length === 0 ? (
-        <div className="empty-state-card">
+        <div className="empty-state-card" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '14px' }}>
           <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
           </svg>
-          <p style={{ fontWeight: 600, color: '#fff' }}>No Accessible Projects</p>
-          <p style={{ fontSize: '0.8125rem', maxWidth: '420px', margin: '0 auto' }}>
+          <p style={{ fontWeight: 600, color: '#fff', fontSize: '0.9375rem' }}>No Accessible Projects</p>
+          <p style={{ fontSize: '0.8125rem', maxWidth: '420px', margin: '0 auto', lineHeight: 1.5 }}>
             No projects were found in your authorized administrative scope. An acquisition case must be linked to an existing project.
           </p>
-          <Link href="/projects/new" className="btn-primary" style={{ marginTop: '1rem' }}>
+          <Link href="/projects/new" className="btn-primary" style={{ marginTop: '0.5rem' }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
             Create a Project First
           </Link>
         </div>
       ) : (
-        <form onSubmit={handleSubmit} className="form-card" style={{ padding: '1.75rem', background: '#1e293b', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.08)' }}>
-          {/* Project Selection */}
-          <div style={{ marginBottom: '1.5rem' }}>
-            <label
-              htmlFor="case-project-select"
-              style={{ display: 'block', fontSize: '0.875rem', fontWeight: 600, color: '#f1f5f9', marginBottom: '0.5rem' }}
-            >
-              Linked Infrastructure Project <span style={{ color: '#ef4444' }}>*</span>
-            </label>
-            <select
-              id="case-project-select"
-              value={selectedProjectId}
-              onChange={(e) => setSelectedProjectId(e.target.value)}
-              className="users-filter-select"
-              style={{ width: '100%', height: '42px', padding: '0 0.75rem' }}
-              required
-            >
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} ({p.projectCode}) — {p.administrativeUnit?.name} [{p.status}]
-                </option>
-              ))}
-            </select>
-            {selectedProject && (
-              <div
+        <div
+          className="detail-panel-card"
+          style={{
+            padding: '2rem',
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-color)',
+            borderRadius: '14px',
+            boxShadow: '0 4px 20px rgba(0, 0, 0, 0.25)',
+          }}
+        >
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column' }}>
+            {/* Project Selection */}
+            <div style={{ marginBottom: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <label
+                htmlFor="case-project-select"
                 style={{
-                  marginTop: '0.5rem',
-                  fontSize: '0.75rem',
-                  color: '#94a3b8',
-                  background: 'rgba(0,0,0,0.2)',
-                  padding: '0.5rem 0.75rem',
-                  borderRadius: '6px',
+                  fontSize: '0.875rem',
+                  fontWeight: 600,
+                  color: 'var(--text-primary)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.25rem',
                 }}
               >
-                <span><strong>Agency:</strong> {selectedProject.implementingAgency?.name} ({selectedProject.implementingAgency?.code})</span>
-                <span style={{ marginLeft: '1rem' }}><strong>Admin Unit:</strong> {selectedProject.administrativeUnit?.name} ({selectedProject.administrativeUnit?.code})</span>
-              </div>
-            )}
-          </div>
+                <span>Linked Infrastructure Project</span>
+                <span style={{ color: 'var(--status-danger)' }}>*</span>
+              </label>
+              <select
+                id="case-project-select"
+                value={selectedProjectId}
+                onChange={(e) => setSelectedProjectId(e.target.value)}
+                className="filter-select"
+                style={{
+                  height: '42px',
+                  padding: '0 0.875rem',
+                  fontSize: '0.875rem',
+                  borderRadius: '8px',
+                  width: '100%',
+                }}
+                required
+              >
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} ({p.projectCode}) — {p.administrativeUnit?.name} [{p.status}]
+                  </option>
+                ))}
+              </select>
 
-          {/* Case Title */}
-          <div style={{ marginBottom: '1.5rem' }}>
-            <label
-              htmlFor="case-title-input"
-              style={{ display: 'block', fontSize: '0.875rem', fontWeight: 600, color: '#f1f5f9', marginBottom: '0.5rem' }}
-            >
-              Case Title <span style={{ color: '#ef4444' }}>*</span>
-            </label>
-            <input
-              id="case-title-input"
-              type="text"
-              placeholder="e.g. Land Acquisition for Bengaluru-Mysuru Expressway Section 2"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              className="users-search-input"
-              style={{ width: '100%', height: '42px', padding: '0 0.75rem' }}
-              minLength={3}
-              maxLength={255}
-              required
-            />
-          </div>
-
-          {/* Description */}
-          <div style={{ marginBottom: '2rem' }}>
-            <label
-              htmlFor="case-desc-input"
-              style={{ display: 'block', fontSize: '0.875rem', fontWeight: 600, color: '#f1f5f9', marginBottom: '0.5rem' }}
-            >
-              Description & Scope Details <span style={{ color: '#64748b', fontWeight: 400 }}>(Optional)</span>
-            </label>
-            <textarea
-              id="case-desc-input"
-              placeholder="Describe the initial acquisition requirement, affected villages, or special statutory directives..."
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="users-search-input"
-              style={{ width: '100%', minHeight: '100px', padding: '0.75rem' }}
-              maxLength={2000}
-            />
-          </div>
-
-          {/* Form Actions */}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
-            <Link
-              href="/acquisition-cases"
-              className="btn-secondary"
-              style={{ textDecoration: 'none' }}
-            >
-              Cancel
-            </Link>
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="btn-primary"
-              id="submit-create-case-btn"
-            >
-              {isSubmitting ? (
-                <>
-                  <span className="spinner-sm" />
-                  Creating Case Draft...
-                </>
-              ) : (
-                'Create Draft Case'
+              {/* Subdued Project Summary Card */}
+              {selectedProject && (
+                <div
+                  style={{
+                    marginTop: '0.25rem',
+                    background: 'rgba(15, 23, 42, 0.6)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: '8px',
+                    padding: '0.875rem 1rem',
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                    gap: '0.875rem',
+                    fontSize: '0.8125rem',
+                  }}
+                >
+                  <div>
+                    <span style={{ color: 'var(--text-muted)', fontSize: '0.6875rem', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', fontWeight: 700 }}>
+                      Implementing Agency
+                    </span>
+                    <span style={{ color: 'var(--text-primary)', fontWeight: 500, marginTop: '2px', display: 'block', wordBreak: 'break-word', lineHeight: 1.35 }}>
+                      {selectedProject.implementingAgency?.name} ({selectedProject.implementingAgency?.code})
+                    </span>
+                  </div>
+                  <div>
+                    <span style={{ color: 'var(--text-muted)', fontSize: '0.6875rem', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', fontWeight: 700 }}>
+                      Administrative Scope
+                    </span>
+                    <span style={{ color: 'var(--text-primary)', fontWeight: 500, marginTop: '2px', display: 'block', wordBreak: 'break-word', lineHeight: 1.35 }}>
+                      {selectedProject.administrativeUnit?.name}{' '}
+                      <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                        ({selectedProject.administrativeUnit?.code} • {selectedProject.administrativeUnit?.type})
+                      </span>
+                    </span>
+                  </div>
+                </div>
               )}
-            </button>
-          </div>
-        </form>
+            </div>
+
+            {/* Case Title */}
+            <div style={{ marginBottom: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <label
+                htmlFor="case-title-input"
+                style={{
+                  fontSize: '0.875rem',
+                  fontWeight: 600,
+                  color: 'var(--text-primary)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.25rem',
+                }}
+              >
+                <span>Case Title</span>
+                <span style={{ color: 'var(--status-danger)' }}>*</span>
+              </label>
+              <input
+                id="case-title-input"
+                type="text"
+                placeholder="e.g. Land Acquisition for Bengaluru-Mysuru Expressway Section 2"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                className="search-input"
+                style={{
+                  height: '42px',
+                  padding: '0 0.875rem',
+                  fontSize: '0.875rem',
+                  borderRadius: '8px',
+                  width: '100%',
+                }}
+                minLength={3}
+                maxLength={255}
+                required
+              />
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                Enter a descriptive title identifying the acquisition stretch, section, or statutory purpose.
+              </span>
+            </div>
+
+            {/* Description & Scope Details */}
+            <div style={{ marginBottom: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <label
+                htmlFor="case-desc-input"
+                style={{
+                  fontSize: '0.875rem',
+                  fontWeight: 600,
+                  color: 'var(--text-primary)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                }}
+              >
+                <span>Description &amp; Scope Details</span>
+                <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem', fontWeight: 400 }}>
+                  (Optional)
+                </span>
+              </label>
+              <textarea
+                id="case-desc-input"
+                placeholder="Describe preliminary land requirements, affected taluks/villages, or special statutory instructions..."
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                className="search-input"
+                style={{
+                  minHeight: '120px',
+                  padding: '0.75rem 0.875rem',
+                  fontSize: '0.875rem',
+                  borderRadius: '8px',
+                  width: '100%',
+                  lineHeight: 1.5,
+                  resize: 'vertical',
+                }}
+                maxLength={2000}
+              />
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                Maximum 2,000 characters. Specific individual affected parcels will be verified in subsequent field verification stages.
+              </span>
+            </div>
+
+            {/* Form Actions */}
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'flex-end',
+                alignItems: 'center',
+                gap: '0.75rem',
+                paddingTop: '1.5rem',
+                borderTop: '1px solid var(--border-subtle)',
+                marginTop: '0.5rem',
+                flexWrap: 'wrap',
+              }}
+            >
+              <Link
+                href="/acquisition-cases"
+                className="btn-cancel"
+                style={{ textDecoration: 'none', textAlign: 'center' }}
+              >
+                Cancel
+              </Link>
+              <button
+                type="submit"
+                disabled={isSubmitting || !title.trim() || !selectedProjectId}
+                className="btn-primary"
+                id="submit-create-case-btn"
+                style={{ minWidth: '160px', justifyContent: 'center' }}
+              >
+                {isSubmitting ? (
+                  <>
+                    <span className="spinner-sm" />
+                    <span>Creating Case Draft...</span>
+                  </>
+                ) : (
+                  'Create Draft Case'
+                )}
+              </button>
+            </div>
+          </form>
+        </div>
       )}
     </div>
   );

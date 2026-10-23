@@ -1908,6 +1908,35 @@ body {
 .projects-table .col-created   { width: 95px; }
 .projects-table .col-actions   { width: 110px; }
 
+/* Acquisition Cases-specific column widths and layout */
+.cases-table {
+  min-width: 1060px;
+}
+
+.cases-table .col-case-ref     { width: 160px; }
+.cases-table .col-case-title   { width: 280px; }
+.cases-table .col-case-project { width: 190px; }
+.cases-table .col-case-unit    { width: 150px; }
+.cases-table .col-case-status  { width: 140px; }
+.cases-table .col-case-created { width: 120px; }
+.cases-table .col-case-actions { width: 110px; }
+
+.cases-search-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1 1 340px;
+  min-width: 260px;
+  max-width: 100%;
+}
+
+@media (max-width: 640px) {
+  .cases-search-wrapper {
+    flex-basis: 100%;
+    min-width: 100%;
+  }
+}
+
 .users-table th {
   background-color: rgba(15, 23, 42, 0.7);
   color: var(--text-secondary);
