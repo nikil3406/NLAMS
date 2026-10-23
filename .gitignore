@@ -27,6 +27,7 @@ Thumbs.db
 coverage/
 playwright-report/
 test-results/
+cookie.txt
 
 # IDE and editors
 .idea/
