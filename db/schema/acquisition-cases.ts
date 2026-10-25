@@ -14,6 +14,7 @@ import { users } from './users';
 export const ACQUISITION_CASE_STATUSES = [
   'DRAFT',
   'SUBMITTED',
+  'AWAITING_FIELD_VERIFICATION',
   'RETURNED_FOR_CORRECTION',
   'REJECTED',
 ] as const;

@@ -28,6 +28,12 @@ const STATUS_BADGE_STYLES: Record<
     border: 'rgba(59, 130, 246, 0.3)',
     label: 'Submitted for Review',
   },
+  AWAITING_FIELD_VERIFICATION: {
+    bg: 'rgba(16, 185, 129, 0.12)',
+    color: '#34d399',
+    border: 'rgba(16, 185, 129, 0.3)',
+    label: 'Awaiting Field Verification',
+  },
   RETURNED_FOR_CORRECTION: {
     bg: 'rgba(245, 158, 11, 0.12)',
     color: '#fbbf24',
@@ -49,6 +55,9 @@ export function AcquisitionCaseDetailsClient({
 }: AcquisitionCaseDetailsClientProps) {
   const canUpdate = isSuperAdmin || userPermissions.includes('ACQUISITION_CASE_UPDATE');
   const canSubmit = isSuperAdmin || userPermissions.includes('ACQUISITION_CASE_SUBMIT');
+  const canReview = isSuperAdmin || userPermissions.includes('ACQUISITION_CASE_REVIEW');
+  const canAuthorizeField = isSuperAdmin || userPermissions.includes('FIELD_VERIFICATION_AUTHORIZE');
+  const hasAnyReviewPermission = canReview || canAuthorizeField;
 
   const [acqCase, setAcqCase] = useState<AcquisitionCaseWithRelations | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -67,6 +76,14 @@ export function AcquisitionCaseDetailsClient({
   const [submissionRemarks, setSubmissionRemarks] = useState('');
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // Review Modal State
+  const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
+  const [reviewDecision, setReviewDecision] = useState<'PERMIT_FIELD_VERIFICATION' | 'RETURN_FOR_CORRECTION' | 'REJECT'>('PERMIT_FIELD_VERIFICATION');
+  const [reviewRemarks, setReviewRemarks] = useState('');
+  const [isDecisionConfirmed, setIsDecisionConfirmed] = useState(false);
+  const [isRecordingDecision, setIsRecordingDecision] = useState(false);
+  const [reviewError, setReviewError] = useState<string | null>(null);
 
   const loadCase = useCallback(async () => {
     setIsLoading(true);
@@ -187,6 +204,71 @@ export function AcquisitionCaseDetailsClient({
     }
   };
 
+  // Open Review Decision Modal
+  const handleOpenReview = (
+    decision: 'PERMIT_FIELD_VERIFICATION' | 'RETURN_FOR_CORRECTION' | 'REJECT'
+  ) => {
+    setReviewDecision(decision);
+    setReviewRemarks('');
+    setIsDecisionConfirmed(false);
+    setReviewError(null);
+    setIsReviewModalOpen(true);
+  };
+
+  // Confirm and Record Review Decision
+  const handleConfirmReviewDecision = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setReviewError(null);
+
+    const trimmedRemarks = reviewRemarks.trim();
+    if (reviewDecision === 'RETURN_FOR_CORRECTION' && !trimmedRemarks) {
+      setReviewError('Remarks are required when returning a case for correction.');
+      return;
+    }
+    if (reviewDecision === 'REJECT' && !trimmedRemarks) {
+      setReviewError('A reason is required when rejecting an acquisition case.');
+      return;
+    }
+
+    if (!isDecisionConfirmed) {
+      setReviewError('Please check the confirmation box to authorize this decision.');
+      return;
+    }
+
+    setIsRecordingDecision(true);
+    try {
+      const res = await fetch(`/api/acquisition-cases/${caseId}/review`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          decision: reviewDecision,
+          remarks: trimmedRemarks || undefined,
+        }),
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || 'Failed to record review decision');
+      }
+
+      setAcqCase(json.data);
+      setIsReviewModalOpen(false);
+      setSuccessMessage(
+        reviewDecision === 'PERMIT_FIELD_VERIFICATION'
+          ? 'Field verification authorized successfully. Case is now Awaiting Field Verification.'
+          : reviewDecision === 'RETURN_FOR_CORRECTION'
+          ? 'Case successfully returned for correction.'
+          : 'Acquisition case has been formally rejected.'
+      );
+    } catch (err: unknown) {
+      setReviewError(
+        err instanceof Error ? err.message : 'An error occurred recording review decision'
+      );
+    } finally {
+      setIsRecordingDecision(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="users-page-container">
@@ -299,6 +381,24 @@ export function AcquisitionCaseDetailsClient({
                 Submit for Review
               </button>
             )}
+
+            {acqCase.status === 'SUBMITTED' && hasAnyReviewPermission && (
+              <button
+                type="button"
+                onClick={() =>
+                  handleOpenReview(canAuthorizeField ? 'PERMIT_FIELD_VERIFICATION' : 'RETURN_FOR_CORRECTION')
+                }
+                className="btn-primary"
+                style={{ backgroundColor: '#059669', borderColor: '#10b981' }}
+                id="header-review-case-btn"
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M9 11l3 3L22 4" />
+                  <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+                </svg>
+                Review Decision
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -330,8 +430,69 @@ export function AcquisitionCaseDetailsClient({
         </div>
       )}
 
-      {/* Status Alert for non-editable cases */}
-      {acqCase.status === 'SUBMITTED' && (
+      {/* Status Alerts & Review Panels */}
+      {acqCase.status === 'SUBMITTED' && hasAnyReviewPermission && (
+        <div
+          style={{
+            background: 'rgba(59, 130, 246, 0.08)',
+            border: '1px solid rgba(59, 130, 246, 0.28)',
+            borderRadius: '12px',
+            padding: '1.25rem',
+            marginBottom: '1.5rem',
+          }}
+          id="review-action-banner"
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+                <span style={{ color: '#60a5fa', fontSize: '0.9375rem', fontWeight: 600 }}>
+                  Case Pending Review & Authorization
+                </span>
+              </div>
+              <p style={{ margin: 0, fontSize: '0.8125rem', color: '#94a3b8' }}>
+                As an authorized official, review the acquisition case requirements and record a formal workflow decision.
+              </p>
+            </div>
+            <div style={{ display: 'flex', gap: '0.625rem', flexWrap: 'wrap' }}>
+              {canAuthorizeField && (
+                <button
+                  type="button"
+                  onClick={() => handleOpenReview('PERMIT_FIELD_VERIFICATION')}
+                  className="btn-primary"
+                  style={{ backgroundColor: '#059669', borderColor: '#10b981', fontSize: '0.8125rem' }}
+                  id="permit-field-verification-btn"
+                >
+                  ✓ Permit Field Verification
+                </button>
+              )}
+              {canReview && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenReview('RETURN_FOR_CORRECTION')}
+                    className="btn-secondary"
+                    style={{ borderColor: 'rgba(245, 158, 11, 0.5)', color: '#fbbf24', fontSize: '0.8125rem' }}
+                    id="return-case-btn"
+                  >
+                    ↩ Return for Correction
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenReview('REJECT')}
+                    className="btn-secondary"
+                    style={{ borderColor: 'rgba(239, 68, 68, 0.5)', color: '#f87171', fontSize: '0.8125rem' }}
+                    id="reject-case-btn"
+                  >
+                    ✕ Reject Case
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {acqCase.status === 'SUBMITTED' && !hasAnyReviewPermission && (
         <div
           style={{
             background: 'rgba(59, 130, 246, 0.08)',
@@ -342,9 +503,26 @@ export function AcquisitionCaseDetailsClient({
             fontSize: '0.8125rem',
             color: '#93c5fd',
           }}
+          id="no-review-permission-banner"
         >
-          <strong>Case Submitted for Review:</strong> This case is locked from direct editing. An authorized official
-          will review the acquisition details to decide whether to permit field verification, return for correction, or reject.
+          <strong>Case Submitted for Review:</strong> This case is locked from direct editing. An authorized official will review the acquisition details to decide whether to permit field verification, return for correction, or reject. You do not currently have authorization to review this case.
+        </div>
+      )}
+
+      {acqCase.status === 'AWAITING_FIELD_VERIFICATION' && (
+        <div
+          style={{
+            background: 'rgba(16, 185, 129, 0.08)',
+            border: '1px solid rgba(16, 185, 129, 0.25)',
+            borderRadius: '8px',
+            padding: '0.875rem 1rem',
+            marginBottom: '1.5rem',
+            fontSize: '0.8125rem',
+            color: '#6ee7b7',
+          }}
+          id="awaiting-verification-banner"
+        >
+          <strong>Field Verification Authorized:</strong> This case has been reviewed and permitted for field verification. Ground survey and field verification activities are now authorized to commence. (Note: Permission to conduct field verification is administrative and does not constitute statutory authorization to acquire land.)
         </div>
       )}
 
@@ -359,9 +537,26 @@ export function AcquisitionCaseDetailsClient({
             fontSize: '0.8125rem',
             color: '#fde68a',
           }}
+          id="returned-for-correction-banner"
         >
-          <strong>Returned for Correction:</strong> This case has been returned for adjustments. You may update the details
-          and resubmit the case for review.
+          <strong>Returned for Correction:</strong> This case has been returned for adjustments by a reviewer. You may update the details and resubmit the case for review.
+        </div>
+      )}
+
+      {acqCase.status === 'REJECTED' && (
+        <div
+          style={{
+            background: 'rgba(239, 68, 68, 0.08)',
+            border: '1px solid rgba(239, 68, 68, 0.25)',
+            borderRadius: '8px',
+            padding: '0.875rem 1rem',
+            marginBottom: '1.5rem',
+            fontSize: '0.8125rem',
+            color: '#f87171',
+          }}
+          id="rejected-case-banner"
+        >
+          <strong>Case Rejected:</strong> This acquisition case has been reviewed and rejected. No further actions or resubmissions may be performed on this case.
         </div>
       )}
 
@@ -484,71 +679,94 @@ export function AcquisitionCaseDetailsClient({
           <p style={{ fontSize: '0.875rem', color: '#64748b' }}>No workflow history entries found.</p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', position: 'relative' }}>
-            {acqCase.workflowHistory.map((item, idx) => (
-              <div
-                key={item.id}
-                style={{
-                  display: 'flex',
-                  gap: '1rem',
-                  paddingBottom: idx !== (acqCase.workflowHistory?.length ?? 0) - 1 ? '1rem' : 0,
-                  borderBottom: idx !== (acqCase.workflowHistory?.length ?? 0) - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none',
-                }}
-              >
-                {/* Timeline Icon */}
-                <div
-                  style={{
-                    width: '32px',
-                    height: '32px',
-                    borderRadius: '50%',
-                    background: item.action === 'CREATE' ? 'rgba(59, 130, 246, 0.15)' : 'rgba(16, 185, 129, 0.15)',
-                    color: item.action === 'CREATE' ? '#60a5fa' : '#34d399',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0,
-                  }}
-                >
-                  {item.action === 'CREATE' ? '★' : '✓'}
-                </div>
+            {acqCase.workflowHistory.map((item, idx) => {
+              const getActionMeta = () => {
+                switch (item.action) {
+                  case 'CREATE':
+                    return { icon: '★', bg: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', border: '#3b82f6', label: 'Case Draft Created' };
+                  case 'SUBMIT':
+                    return { icon: '➔', bg: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', border: '#3b82f6', label: 'Submitted for Review' };
+                  case 'PERMIT_FIELD_VERIFICATION':
+                  case 'AUTHORIZE_FIELD_VERIFICATION':
+                    return { icon: '✓', bg: 'rgba(16, 185, 129, 0.15)', color: '#34d399', border: '#10b981', label: 'Field Verification Authorized' };
+                  case 'RETURN_FOR_CORRECTION':
+                    return { icon: '↩', bg: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', border: '#f59e0b', label: 'Returned for Correction' };
+                  case 'REJECT':
+                    return { icon: '✕', bg: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: '#ef4444', label: 'Case Rejected' };
+                  default:
+                    return { icon: '•', bg: 'rgba(148, 163, 184, 0.15)', color: '#94a3b8', border: '#64748b', label: item.action };
+                }
+              };
+              const meta = getActionMeta();
 
-                {/* Details */}
-                <div style={{ flex: 1 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <strong style={{ color: '#fff', fontSize: '0.875rem' }}>
-                        {item.action === 'CREATE' ? 'Case Draft Created' : item.action === 'SUBMIT' ? 'Submitted for Review' : item.action}
-                      </strong>
-                      <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
-                        ({item.fromStatus ? `${item.fromStatus} → ` : ''}{item.toStatus})
+              return (
+                <div
+                  key={item.id}
+                  style={{
+                    display: 'flex',
+                    gap: '1rem',
+                    paddingBottom: idx !== (acqCase.workflowHistory?.length ?? 0) - 1 ? '1rem' : 0,
+                    borderBottom: idx !== (acqCase.workflowHistory?.length ?? 0) - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none',
+                  }}
+                  id={`history-item-${item.id}`}
+                >
+                  {/* Timeline Icon */}
+                  <div
+                    style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '50%',
+                      background: meta.bg,
+                      color: meta.color,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0,
+                      fontWeight: 700,
+                    }}
+                  >
+                    {meta.icon}
+                  </div>
+
+                  {/* Details */}
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                        <strong style={{ color: '#fff', fontSize: '0.875rem' }}>
+                          {meta.label}
+                        </strong>
+                        <span style={{ fontSize: '0.75rem', color: '#94a3b8', fontFamily: 'monospace' }}>
+                          ({item.fromStatus ? `${item.fromStatus} → ` : ''}{item.toStatus})
+                        </span>
+                      </div>
+                      <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                        {new Date(item.createdAt).toLocaleString()}
                       </span>
                     </div>
-                    <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
-                      {new Date(item.createdAt).toLocaleString()}
-                    </span>
-                  </div>
 
-                  <div style={{ fontSize: '0.8125rem', color: '#94a3b8' }}>
-                    <span>By <strong>{item.actor.name}</strong> ({item.actor.email})</span>
-                  </div>
-
-                  {item.remarks && (
-                    <div
-                      style={{
-                        marginTop: '0.5rem',
-                        fontSize: '0.8125rem',
-                        color: '#cbd5e1',
-                        background: 'rgba(0,0,0,0.2)',
-                        padding: '0.5rem 0.75rem',
-                        borderRadius: '6px',
-                        borderLeft: '3px solid #3b82f6',
-                      }}
-                    >
-                      {item.remarks}
+                    <div style={{ fontSize: '0.8125rem', color: '#94a3b8' }}>
+                      <span>Reviewer/Actor: <strong>{item.actor.name}</strong> ({item.actor.email})</span>
                     </div>
-                  )}
+
+                    {item.remarks && (
+                      <div
+                        style={{
+                          marginTop: '0.5rem',
+                          fontSize: '0.8125rem',
+                          color: '#cbd5e1',
+                          background: 'rgba(0,0,0,0.2)',
+                          padding: '0.5rem 0.75rem',
+                          borderRadius: '6px',
+                          borderLeft: `3px solid ${meta.border}`,
+                        }}
+                      >
+                        {item.remarks}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -721,6 +939,279 @@ export function AcquisitionCaseDetailsClient({
                   id="confirm-submit-review-btn"
                 >
                   {isSubmittingReview ? 'Submitting...' : 'Confirm Submission'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Review Decision Modal */}
+      {isReviewModalOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.75)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 60,
+            padding: '1rem',
+          }}
+          id="review-decision-modal-overlay"
+        >
+          <div
+            style={{
+              background: '#1e293b',
+              border: '1px solid rgba(255,255,255,0.12)',
+              borderRadius: '12px',
+              padding: '1.75rem',
+              width: '100%',
+              maxWidth: '580px',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.4)',
+            }}
+            id="review-decision-modal"
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.25rem' }}>
+              <div>
+                <h3 style={{ fontSize: '1.25rem', fontWeight: 600, color: '#fff', margin: '0 0 0.25rem 0' }}>
+                  Record Review Decision
+                </h3>
+                <p style={{ margin: 0, fontSize: '0.8125rem', color: '#94a3b8' }}>
+                  Case: <span style={{ fontFamily: 'monospace', color: '#60a5fa' }}>{acqCase.caseReference}</span> — {acqCase.title}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsReviewModalOpen(false)}
+                style={{ background: 'transparent', border: 'none', color: '#94a3b8', fontSize: '1.25rem', cursor: 'pointer' }}
+                disabled={isRecordingDecision}
+              >
+                ✕
+              </button>
+            </div>
+
+            {reviewError && (
+              <div className="alert-banner-error" role="alert" style={{ marginBottom: '1rem' }} id="review-error-banner">
+                <span>{reviewError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleConfirmReviewDecision}>
+              {/* Decision Options */}
+              <div style={{ marginBottom: '1.25rem' }}>
+                <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 600, color: '#f1f5f9', marginBottom: '0.5rem' }}>
+                  Select Review Decision <span style={{ color: '#ef4444' }}>*</span>
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '0.5rem' }}>
+                  {canAuthorizeField && (
+                    <button
+                      type="button"
+                      onClick={() => setReviewDecision('PERMIT_FIELD_VERIFICATION')}
+                      style={{
+                        padding: '0.625rem 0.75rem',
+                        borderRadius: '8px',
+                        border: reviewDecision === 'PERMIT_FIELD_VERIFICATION' ? '2px solid #10b981' : '1px solid rgba(255,255,255,0.1)',
+                        background: reviewDecision === 'PERMIT_FIELD_VERIFICATION' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(255,255,255,0.03)',
+                        color: reviewDecision === 'PERMIT_FIELD_VERIFICATION' ? '#34d399' : '#94a3b8',
+                        fontSize: '0.8125rem',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        textAlign: 'center',
+                      }}
+                      id="radio-permit-verification"
+                    >
+                      ✓ Permit Field Verification
+                    </button>
+                  )}
+                  {canReview && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setReviewDecision('RETURN_FOR_CORRECTION')}
+                        style={{
+                          padding: '0.625rem 0.75rem',
+                          borderRadius: '8px',
+                          border: reviewDecision === 'RETURN_FOR_CORRECTION' ? '2px solid #f59e0b' : '1px solid rgba(255,255,255,0.1)',
+                          background: reviewDecision === 'RETURN_FOR_CORRECTION' ? 'rgba(245, 158, 11, 0.15)' : 'rgba(255,255,255,0.03)',
+                          color: reviewDecision === 'RETURN_FOR_CORRECTION' ? '#fbbf24' : '#94a3b8',
+                          fontSize: '0.8125rem',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          textAlign: 'center',
+                        }}
+                        id="radio-return-correction"
+                      >
+                        ↩ Return for Correction
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setReviewDecision('REJECT')}
+                        style={{
+                          padding: '0.625rem 0.75rem',
+                          borderRadius: '8px',
+                          border: reviewDecision === 'REJECT' ? '2px solid #ef4444' : '1px solid rgba(255,255,255,0.1)',
+                          background: reviewDecision === 'REJECT' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(255,255,255,0.03)',
+                          color: reviewDecision === 'REJECT' ? '#f87171' : '#94a3b8',
+                          fontSize: '0.8125rem',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          textAlign: 'center',
+                        }}
+                        id="radio-reject-case"
+                      >
+                        ✕ Reject Case
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* Consequence note */}
+              <div
+                style={{
+                  background:
+                    reviewDecision === 'PERMIT_FIELD_VERIFICATION'
+                      ? 'rgba(16, 185, 129, 0.08)'
+                      : reviewDecision === 'RETURN_FOR_CORRECTION'
+                      ? 'rgba(245, 158, 11, 0.08)'
+                      : 'rgba(239, 68, 68, 0.08)',
+                  border:
+                    reviewDecision === 'PERMIT_FIELD_VERIFICATION'
+                      ? '1px solid rgba(16, 185, 129, 0.25)'
+                      : reviewDecision === 'RETURN_FOR_CORRECTION'
+                      ? '1px solid rgba(245, 158, 11, 0.25)'
+                      : '1px solid rgba(239, 68, 68, 0.25)',
+                  borderRadius: '8px',
+                  padding: '0.75rem 1rem',
+                  fontSize: '0.8125rem',
+                  color:
+                    reviewDecision === 'PERMIT_FIELD_VERIFICATION'
+                      ? '#6ee7b7'
+                      : reviewDecision === 'RETURN_FOR_CORRECTION'
+                      ? '#fde68a'
+                      : '#fca5a5',
+                  marginBottom: '1.25rem',
+                }}
+              >
+                {reviewDecision === 'PERMIT_FIELD_VERIFICATION' && (
+                  <span>
+                    <strong>Result: Awaiting Field Verification.</strong> Authorizes field officers to conduct field verification surveys within the project boundary. (Note: This is administrative survey authorization, not statutory land acquisition.)
+                  </span>
+                )}
+                {reviewDecision === 'RETURN_FOR_CORRECTION' && (
+                  <span>
+                    <strong>Result: Returned for Correction.</strong> The case returns to editable status for the submitting officer. Remarks specifying required adjustments are mandatory.
+                  </span>
+                )}
+                {reviewDecision === 'REJECT' && (
+                  <span>
+                    <strong>Result: Rejected (Terminal).</strong> Formally rejects the acquisition case. No further modifications or resubmissions are permitted. A mandatory rejection reason is required.
+                  </span>
+                )}
+              </div>
+
+              {/* Remarks / Reason textarea */}
+              <div style={{ marginBottom: '1.25rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.375rem' }}>
+                  <label
+                    htmlFor="review-decision-remarks"
+                    style={{ fontSize: '0.875rem', fontWeight: 600, color: '#f1f5f9' }}
+                  >
+                    {reviewDecision === 'RETURN_FOR_CORRECTION' ? (
+                      <>Correction Remarks <span style={{ color: '#ef4444' }}>*</span></>
+                    ) : reviewDecision === 'REJECT' ? (
+                      <>Rejection Reason <span style={{ color: '#ef4444' }}>*</span></>
+                    ) : (
+                      <>Review Remarks <span style={{ color: '#64748b', fontWeight: 400 }}>(Optional)</span></>
+                    )}
+                  </label>
+                  <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                    {reviewRemarks.length}/1000
+                  </span>
+                </div>
+                <textarea
+                  id="review-decision-remarks"
+                  placeholder={
+                    reviewDecision === 'RETURN_FOR_CORRECTION'
+                      ? 'Specify the required corrections or missing documentation...'
+                      : reviewDecision === 'REJECT'
+                      ? 'Enter the formal reason for rejecting this acquisition case...'
+                      : 'Add any operational guidance for the field verification team...'
+                  }
+                  value={reviewRemarks}
+                  onChange={(e) => setReviewRemarks(e.target.value)}
+                  className="users-search-input"
+                  style={{ width: '100%', minHeight: '90px', padding: '0.75rem' }}
+                  maxLength={1000}
+                />
+              </div>
+
+              {/* Confirmation Checkbox */}
+              <div
+                style={{
+                  background: 'rgba(0,0,0,0.2)',
+                  padding: '0.75rem',
+                  borderRadius: '8px',
+                  border: '1px solid rgba(255,255,255,0.06)',
+                  marginBottom: '1.5rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.625rem',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  id="confirm-decision-checkbox"
+                  checked={isDecisionConfirmed}
+                  onChange={(e) => setIsDecisionConfirmed(e.target.checked)}
+                  style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#3b82f6' }}
+                />
+                <label
+                  htmlFor="confirm-decision-checkbox"
+                  style={{ fontSize: '0.8125rem', color: '#cbd5e1', cursor: 'pointer', userSelect: 'none' }}
+                >
+                  I confirm that I have evaluated this case and authorize recording this workflow decision.
+                </label>
+              </div>
+
+              {/* Modal Action Buttons */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+                <button
+                  type="button"
+                  onClick={() => setIsReviewModalOpen(false)}
+                  className="btn-secondary"
+                  disabled={isRecordingDecision}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={
+                    isRecordingDecision ||
+                    !isDecisionConfirmed ||
+                    (reviewDecision === 'RETURN_FOR_CORRECTION' && !reviewRemarks.trim()) ||
+                    (reviewDecision === 'REJECT' && !reviewRemarks.trim())
+                  }
+                  className="btn-primary"
+                  style={{
+                    backgroundColor:
+                      reviewDecision === 'PERMIT_FIELD_VERIFICATION'
+                        ? '#059669'
+                        : reviewDecision === 'RETURN_FOR_CORRECTION'
+                        ? '#d97706'
+                        : '#dc2626',
+                    borderColor:
+                      reviewDecision === 'PERMIT_FIELD_VERIFICATION'
+                        ? '#10b981'
+                        : reviewDecision === 'RETURN_FOR_CORRECTION'
+                        ? '#f59e0b'
+                        : '#ef4444',
+                  }}
+                  id="submit-review-decision-btn"
+                >
+                  {isRecordingDecision ? 'Recording Decision...' : 'Confirm Decision'}
                 </button>
               </div>
             </form>

@@ -87,6 +87,8 @@ const PERMISSIONS = [
   { name: 'ACQUISITION_CASE_CREATE', description: 'Create draft acquisition cases' },
   { name: 'ACQUISITION_CASE_UPDATE', description: 'Update draft or returned acquisition cases' },
   { name: 'ACQUISITION_CASE_SUBMIT', description: 'Submit acquisition cases for review' },
+  { name: 'ACQUISITION_CASE_REVIEW', description: 'Review submitted acquisition cases and decide next workflow stage' },
+  { name: 'FIELD_VERIFICATION_AUTHORIZE', description: 'Authorize field verification for reviewed acquisition cases' },
 ] as const;
 
 type PermissionName = typeof PERMISSIONS[number]['name'];
@@ -98,6 +100,7 @@ const ROLE_PERMISSIONS: Record<string, PermissionName[]> = {
     'ADMIN_UNIT_VIEW', 'ADMIN_UNIT_CREATE', 'ADMIN_UNIT_UPDATE',
     'PROJECT_VIEW', 'PROJECT_CREATE', 'PROJECT_UPDATE', 'PROJECT_REGISTER',
     'ACQUISITION_CASE_VIEW', 'ACQUISITION_CASE_CREATE', 'ACQUISITION_CASE_UPDATE', 'ACQUISITION_CASE_SUBMIT',
+    'ACQUISITION_CASE_REVIEW', 'FIELD_VERIFICATION_AUTHORIZE',
   ],
   MINISTRY_ADMIN: [
     'USER_VIEW', 'USER_CREATE', 'USER_UPDATE', 'USER_ASSIGN',
@@ -105,11 +108,12 @@ const ROLE_PERMISSIONS: Record<string, PermissionName[]> = {
     'ADMIN_UNIT_VIEW', 'ADMIN_UNIT_CREATE', 'ADMIN_UNIT_UPDATE',
     'PROJECT_VIEW', 'PROJECT_CREATE', 'PROJECT_UPDATE', 'PROJECT_REGISTER',
     'ACQUISITION_CASE_VIEW', 'ACQUISITION_CASE_CREATE', 'ACQUISITION_CASE_UPDATE', 'ACQUISITION_CASE_SUBMIT',
+    'ACQUISITION_CASE_REVIEW', 'FIELD_VERIFICATION_AUTHORIZE',
   ],
   PROJECT_OFFICER: [
     'USER_VIEW', 'ROLE_VIEW', 'ADMIN_UNIT_VIEW',
     'PROJECT_VIEW', 'PROJECT_CREATE', 'PROJECT_UPDATE', 'PROJECT_REGISTER',
-    'ACQUISITION_CASE_VIEW',
+    'ACQUISITION_CASE_VIEW', 'ACQUISITION_CASE_REVIEW', 'FIELD_VERIFICATION_AUTHORIZE',
   ],
   LAND_OFFICER: [
     'USER_VIEW', 'ROLE_VIEW', 'ADMIN_UNIT_VIEW', 'PROJECT_VIEW',

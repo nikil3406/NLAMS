@@ -1,4 +1,9 @@
+import { eq } from 'drizzle-orm';
 import { db } from '../../../db';
+import {
+  acquisitionCases,
+  type AcquisitionCaseStatus,
+} from '../../../db/schema/acquisition-cases';
 import {
   acquisitionCaseRepository,
   type AcquisitionCaseWithRelations,
@@ -11,11 +16,13 @@ import {
   BadRequestError,
   NotFoundError,
   ForbiddenError,
+  ConflictError,
 } from '../../types/errors';
 import type {
   CreateAcquisitionCaseInput,
   UpdateAcquisitionCaseInput,
   SubmitAcquisitionCaseInput,
+  ReviewAcquisitionCaseInput,
   AcquisitionCaseQueryInput,
 } from '../../validators/acquisition-cases';
 
@@ -315,6 +322,141 @@ export class AcquisitionCaseService {
     }
 
     return submitted;
+  }
+
+  /**
+   * Reviews a submitted acquisition case and records an authorized workflow transition decision.
+   * Permitted decisions and resulting transitions:
+   *   PERMIT_FIELD_VERIFICATION / AUTHORIZE_FIELD_VERIFICATION: SUBMITTED -> AWAITING_FIELD_VERIFICATION
+   *   RETURN_FOR_CORRECTION:                                    SUBMITTED -> RETURNED_FOR_CORRECTION
+   *   REJECT:                                                   SUBMITTED -> REJECTED
+   *
+   * Authorization rules:
+   *   - User must have ACQUISITION_CASE_REVIEW permission (for return / reject / general review).
+   *   - If permitting field verification, user must hold FIELD_VERIFICATION_AUTHORIZE permission.
+   *   - Linked project must be within the user's authorized administrative scope.
+   *
+   * Concurrency & Atomicity:
+   *   - Serializes using database-level row locking ('FOR UPDATE') within a single transaction.
+   *   - Verifies case is currently in SUBMITTED status; throws ConflictError (409) if already transitioned
+   *     or concurrently reviewed, or BadRequestError (400) if not yet submitted (DRAFT / RETURNED).
+   *   - Persists decision, status update, and workflow history record atomically.
+   */
+  async reviewCase(
+    id: string,
+    input: ReviewAcquisitionCaseInput,
+    userId: string
+  ): Promise<AcquisitionCaseWithRelations> {
+    // 1. Permission checks
+    if (
+      input.decision === 'PERMIT_FIELD_VERIFICATION' ||
+      input.decision === 'AUTHORIZE_FIELD_VERIFICATION'
+    ) {
+      await permissionService.requirePermission(userId, 'FIELD_VERIFICATION_AUTHORIZE');
+    } else {
+      await permissionService.requirePermission(userId, 'ACQUISITION_CASE_REVIEW');
+    }
+
+    // 2. Initial case retrieval and administrative scope check
+    const acqCase = await acquisitionCaseRepository.findCaseById(id);
+    if (!acqCase) {
+      throw new NotFoundError(`Acquisition case with ID '${id}' not found`);
+    }
+
+    const inScope = await scopeService.isWithinAdministrativeScope(
+      userId,
+      acqCase.project.administrativeUnitId
+    );
+    if (!inScope) {
+      throw new ForbiddenError(
+        'Forbidden: case is outside your authorized administrative scope'
+      );
+    }
+
+    // 3. Map decision to target status and action
+    let toStatus: AcquisitionCaseStatus;
+    const action = input.decision;
+
+    switch (input.decision) {
+      case 'PERMIT_FIELD_VERIFICATION':
+      case 'AUTHORIZE_FIELD_VERIFICATION':
+        toStatus = 'AWAITING_FIELD_VERIFICATION';
+        break;
+      case 'RETURN_FOR_CORRECTION':
+        toStatus = 'RETURNED_FOR_CORRECTION';
+        break;
+      case 'REJECT':
+        toStatus = 'REJECTED';
+        break;
+      default:
+        throw new BadRequestError(`Invalid review decision: '${input.decision}'`);
+    }
+
+    const effectiveRemarks = (input.remarks ?? input.reason ?? '').trim() || null;
+
+    // 4. Atomic transaction with row locking to prevent concurrent / duplicate review decisions
+    await db.transaction(async (tx) => {
+      // Row lock the acquisition case
+      const [lockedCase] = await tx
+        .select({
+          id: acquisitionCases.id,
+          caseReference: acquisitionCases.caseReference,
+          status: acquisitionCases.status,
+        })
+        .from(acquisitionCases)
+        .where(eq(acquisitionCases.id, id))
+        .for('update');
+
+      if (!lockedCase) {
+        throw new NotFoundError(`Acquisition case with ID '${id}' not found`);
+      }
+
+      if (lockedCase.status !== 'SUBMITTED') {
+        if (lockedCase.status === 'DRAFT' || lockedCase.status === 'RETURNED_FOR_CORRECTION') {
+          throw new BadRequestError(
+            `Cannot review case: current status is '${lockedCase.status}'. Only cases in SUBMITTED status can be reviewed.`
+          );
+        }
+        throw new ConflictError(
+          `Cannot review case: current status is '${lockedCase.status}'. The case has already been reviewed or a concurrent decision was processed.`
+        );
+      }
+
+      // Update case status
+      await acquisitionCaseRepository.updateCase(
+        id,
+        {
+          status: toStatus,
+          updatedBy: userId,
+        },
+        tx
+      );
+
+      // Persist workflow history entry
+      await acquisitionCaseRepository.createWorkflowHistory(
+        {
+          caseId: id,
+          caseReference: lockedCase.caseReference,
+          fromStatus: 'SUBMITTED',
+          toStatus,
+          action,
+          actorId: userId,
+          remarks:
+            effectiveRemarks ??
+            (toStatus === 'AWAITING_FIELD_VERIFICATION'
+              ? 'Field verification authorized'
+              : `Review decision: ${action}`),
+        },
+        tx
+      );
+    });
+
+    const reviewed = await acquisitionCaseRepository.findCaseById(id);
+    if (!reviewed) {
+      throw new Error('Failed to retrieve reviewed acquisition case');
+    }
+
+    return reviewed;
   }
 }
 

@@ -27,6 +27,12 @@ const STATUS_BADGE_STYLES: Record<
     border: 'rgba(59, 130, 246, 0.3)',
     label: 'Submitted for Review',
   },
+  AWAITING_FIELD_VERIFICATION: {
+    bg: 'rgba(16, 185, 129, 0.12)',
+    color: '#34d399',
+    border: 'rgba(16, 185, 129, 0.3)',
+    label: 'Awaiting Field Verification',
+  },
   RETURNED_FOR_CORRECTION: {
     bg: 'rgba(245, 158, 11, 0.12)',
     color: '#fbbf24',
@@ -182,6 +188,7 @@ export function AcquisitionCasesClient({
             <option value="">All Statuses</option>
             <option value="DRAFT">Draft</option>
             <option value="SUBMITTED">Submitted for Review</option>
+            <option value="AWAITING_FIELD_VERIFICATION">Awaiting Field Verification</option>
             <option value="RETURNED_FOR_CORRECTION">Returned for Correction</option>
             <option value="REJECTED">Rejected</option>
           </select>

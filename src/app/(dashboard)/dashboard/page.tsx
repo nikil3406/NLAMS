@@ -70,8 +70,9 @@ export default async function DashboardPage() {
     {
       name: 'Land Acquisition',
       description: 'Section 4, 11 notifications, joint measurement surveys, and award inquiries.',
-      status: 'COMING_SOON',
-      phase: 'Phase 4',
+      status: 'AVAILABLE',
+      href: '/acquisition-cases',
+      actionText: 'Manage Acquisition Cases →',
       icon: (
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
