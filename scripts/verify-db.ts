@@ -95,6 +95,11 @@ async function verify() {
     'implementing_agencies',
     'projects',
     'project_boundary_versions',
+    'acquisition_cases',
+    'acquisition_case_workflow_history',
+    'land_parcels',
+    'acquisition_case_parcels',
+    'field_verification_reports',
   ];
 
   console.log('\n  Tables:');
