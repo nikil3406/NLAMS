@@ -40,6 +40,7 @@ export interface AcquisitionCaseWithRelations extends AcquisitionCase {
     status: string;
     administrativeUnitId: string;
     implementingAgencyId: string;
+    createdBy: string;
     administrativeUnit: {
       id: string;
       name: string;
@@ -128,7 +129,7 @@ export class AcquisitionCaseRepository {
     const [row] = await db
       .select({
         caseData: acquisitionCases,
-        project: {
+      project: {
           id: projects.id,
           projectCode: projects.projectCode,
           name: projects.name,
@@ -136,6 +137,7 @@ export class AcquisitionCaseRepository {
           status: projects.status,
           administrativeUnitId: projects.administrativeUnitId,
           implementingAgencyId: projects.implementingAgencyId,
+          createdBy: projects.createdBy,
         },
         adminUnit: {
           id: administrativeUnits.id,
@@ -277,6 +279,7 @@ export class AcquisitionCaseRepository {
           status: projects.status,
           administrativeUnitId: projects.administrativeUnitId,
           implementingAgencyId: projects.implementingAgencyId,
+          createdBy: projects.createdBy,
         },
         adminUnit: {
           id: administrativeUnits.id,

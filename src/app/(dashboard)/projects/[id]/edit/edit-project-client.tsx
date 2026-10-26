@@ -13,7 +13,7 @@ interface EditProjectClientProps {
   currentUserId: string;
 }
 
-export function EditProjectClient({ projectId }: EditProjectClientProps) {
+export function EditProjectClient({ projectId, currentUserId }: EditProjectClientProps) {
   const router = useRouter();
 
   const [project, setProject] = useState<ProjectWithRelations | null>(null);
@@ -61,6 +61,14 @@ export function EditProjectClient({ projectId }: EditProjectClientProps) {
       }
 
       const p: ProjectWithRelations = projJson.data;
+      if (p.createdBy !== currentUserId) {
+        throw new Error('Forbidden: Only the original project creator may edit project details.');
+      }
+      if (p.status !== 'DRAFT' && !p.correctionPendingFor) {
+        throw new Error(
+          `Project is in '${p.status}' status and cannot be edited. Editing is only permitted for DRAFT projects or during an active correction cycle.`
+        );
+      }
       if (p.status === 'COMPLETED' || p.status === 'CANCELLED') {
         throw new Error(`Project is in terminal status '${p.status}' and cannot be edited.`);
       }

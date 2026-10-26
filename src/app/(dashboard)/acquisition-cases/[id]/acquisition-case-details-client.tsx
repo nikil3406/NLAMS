@@ -9,6 +9,7 @@ interface AcquisitionCaseDetailsClientProps {
   caseId: string;
   currentUserId: string;
   userPermissions: string[];
+  userRoles: string[];
   isSuperAdmin: boolean;
 }
 
@@ -50,14 +51,17 @@ const STATUS_BADGE_STYLES: Record<
 
 export function AcquisitionCaseDetailsClient({
   caseId,
+  currentUserId,
   userPermissions,
+  userRoles,
   isSuperAdmin,
 }: AcquisitionCaseDetailsClientProps) {
-  const canUpdate = isSuperAdmin || userPermissions.includes('ACQUISITION_CASE_UPDATE');
-  const canSubmit = isSuperAdmin || userPermissions.includes('ACQUISITION_CASE_SUBMIT');
+  const isLandOfficer = isSuperAdmin || userRoles.includes('LAND_OFFICER');
+  const canUpdate = (isSuperAdmin || userPermissions.includes('ACQUISITION_CASE_UPDATE')) && isLandOfficer;
+  const canSubmit = (isSuperAdmin || userPermissions.includes('ACQUISITION_CASE_SUBMIT')) && isLandOfficer;
   const canReview = isSuperAdmin || userPermissions.includes('ACQUISITION_CASE_REVIEW');
   const canAuthorizeField = isSuperAdmin || userPermissions.includes('FIELD_VERIFICATION_AUTHORIZE');
-  const hasAnyReviewPermission = canReview || canAuthorizeField;
+  const hasReviewPermission = canReview || canAuthorizeField;
 
   const [acqCase, setAcqCase] = useState<AcquisitionCaseWithRelations | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -294,7 +298,39 @@ export function AcquisitionCaseDetailsClient({
   }
 
   const isEditable = acqCase.status === 'DRAFT' || acqCase.status === 'RETURNED_FOR_CORRECTION';
+  const canPerformEdit = isEditable && canUpdate;
   const canPerformSubmit = isEditable && canSubmit;
+
+  // Separation-of-duties: reviewer cannot be project creator or case preparer.
+  // Counterpart-role: if project created by PROJECT_OFFICER, reviewer must have MINISTRY_ADMIN (and vice versa).
+  const isProjectCreator = currentUserId === acqCase.project.createdBy;
+  const isCasePreparer = currentUserId === acqCase.createdBy;
+  const projectCreatorRoles: string[] = (acqCase.project as { creatorRoles?: string[] }).creatorRoles ?? [];
+  // Determine required counterpart role from project creator role
+  let requiredCounterpartRole: string | null = null;
+  if (projectCreatorRoles.includes('PROJECT_OFFICER')) {
+    requiredCounterpartRole = 'MINISTRY_ADMIN';
+  } else if (projectCreatorRoles.includes('MINISTRY_ADMIN')) {
+    requiredCounterpartRole = 'PROJECT_OFFICER';
+  }
+  const holdsCounterpartRole = requiredCounterpartRole
+    ? userRoles.includes(requiredCounterpartRole)
+    : true; // No counterpart requirement (e.g. SUPER_ADMIN-created project)
+
+  // Eligible reviewer: has review permission + is not project creator + is not case preparer + holds required counterpart role
+  const isEligibleReviewer =
+    hasReviewPermission && !isProjectCreator && !isCasePreparer && holdsCounterpartRole;
+
+  // Determine why the user cannot review (for informative banner)
+  const reviewIneligibilityReason: string | null = hasReviewPermission
+    ? isProjectCreator
+      ? 'You created the linked project. Independent counterpart-role review is required — the project creator cannot review the acquisition case for their own project.'
+      : isCasePreparer
+        ? 'You prepared this acquisition case. The Land Officer who submitted the case cannot review it.'
+        : !holdsCounterpartRole && requiredCounterpartRole
+          ? `Counterpart-role review is required. This project was created by a ${projectCreatorRoles.includes('PROJECT_OFFICER') ? 'Project Officer' : 'Ministry Admin'}, so the reviewer must hold the '${requiredCounterpartRole}' role. Your current roles do not include '${requiredCounterpartRole}'.`
+          : null
+    : null;
 
   const badge = STATUS_BADGE_STYLES[acqCase.status as AcquisitionCaseStatus] ?? {
     bg: 'rgba(100,116,139,0.12)',
@@ -352,7 +388,7 @@ export function AcquisitionCaseDetailsClient({
 
           {/* Action Buttons */}
           <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-            {isEditable && canUpdate && (
+            {canPerformEdit && (
               <button
                 type="button"
                 onClick={handleOpenEdit}
@@ -382,7 +418,7 @@ export function AcquisitionCaseDetailsClient({
               </button>
             )}
 
-            {acqCase.status === 'SUBMITTED' && hasAnyReviewPermission && (
+            {acqCase.status === 'SUBMITTED' && isEligibleReviewer && (
               <button
                 type="button"
                 onClick={() =>
@@ -431,7 +467,7 @@ export function AcquisitionCaseDetailsClient({
       )}
 
       {/* Status Alerts & Review Panels */}
-      {acqCase.status === 'SUBMITTED' && hasAnyReviewPermission && (
+      {acqCase.status === 'SUBMITTED' && isEligibleReviewer && (
         <div
           style={{
             background: 'rgba(59, 130, 246, 0.08)',
@@ -450,7 +486,7 @@ export function AcquisitionCaseDetailsClient({
                 </span>
               </div>
               <p style={{ margin: 0, fontSize: '0.8125rem', color: '#94a3b8' }}>
-                As an authorized official, review the acquisition case requirements and record a formal workflow decision.
+                As the authorized counterpart official, review the acquisition case requirements and record a formal workflow decision.
               </p>
             </div>
             <div style={{ display: 'flex', gap: '0.625rem', flexWrap: 'wrap' }}>
@@ -492,20 +528,27 @@ export function AcquisitionCaseDetailsClient({
         </div>
       )}
 
-      {acqCase.status === 'SUBMITTED' && !hasAnyReviewPermission && (
+      {acqCase.status === 'SUBMITTED' && !isEligibleReviewer && (
         <div
           style={{
-            background: 'rgba(59, 130, 246, 0.08)',
-            border: '1px solid rgba(59, 130, 246, 0.25)',
+            background: reviewIneligibilityReason
+              ? 'rgba(245, 158, 11, 0.08)'
+              : 'rgba(59, 130, 246, 0.08)',
+            border: reviewIneligibilityReason
+              ? '1px solid rgba(245, 158, 11, 0.3)'
+              : '1px solid rgba(59, 130, 246, 0.25)',
             borderRadius: '8px',
             padding: '0.875rem 1rem',
             marginBottom: '1.5rem',
             fontSize: '0.8125rem',
-            color: '#93c5fd',
+            color: reviewIneligibilityReason ? '#fde68a' : '#93c5fd',
           }}
           id="no-review-permission-banner"
         >
-          <strong>Case Submitted for Review:</strong> This case is locked from direct editing. An authorized official will review the acquisition details to decide whether to permit field verification, return for correction, or reject. You do not currently have authorization to review this case.
+          <strong>Case Submitted for Review:</strong>{' '}
+          {reviewIneligibilityReason
+            ? reviewIneligibilityReason
+            : 'This case is locked from direct editing. An authorized counterpart official will review the acquisition details to decide whether to permit field verification, return for correction, or reject.'}
         </div>
       )}
 
@@ -539,7 +582,27 @@ export function AcquisitionCaseDetailsClient({
           }}
           id="returned-for-correction-banner"
         >
-          <strong>Returned for Correction:</strong> This case has been returned for adjustments by a reviewer. You may update the details and resubmit the case for review.
+          <strong>Returned for Correction:</strong>{' '}
+          {isLandOfficer
+            ? 'This case has been returned for adjustments by a reviewer. You may update the details and resubmit the case for review.'
+            : 'This case has been returned for adjustments by a reviewer. Only an authorized Land Officer may edit the details and resubmit the case for review.'}
+        </div>
+      )}
+
+      {acqCase.status === 'DRAFT' && !isLandOfficer && (
+        <div
+          style={{
+            background: 'rgba(100, 116, 139, 0.08)',
+            border: '1px solid rgba(100, 116, 139, 0.2)',
+            borderRadius: '8px',
+            padding: '0.75rem 1rem',
+            marginBottom: '1.5rem',
+            fontSize: '0.8125rem',
+            color: 'var(--text-secondary)',
+          }}
+          id="draft-non-land-officer-banner"
+        >
+          <strong>Draft Case (Read-Only):</strong> Acquisition case preparation, editing, and submission for review are restricted to Land Officers.
         </div>
       )}
 

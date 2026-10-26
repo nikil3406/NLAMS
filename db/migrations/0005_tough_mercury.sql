@@ -1,0 +1,1 @@
+ALTER TABLE "projects" ADD COLUMN "correction_pending_for" uuid;

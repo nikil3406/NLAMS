@@ -49,10 +49,25 @@ export class AcquisitionCaseService {
     // 1. Permission check
     await permissionService.requirePermission(userId, 'ACQUISITION_CASE_CREATE');
 
+    // 1b. Role restriction — only LAND_OFFICER may create acquisition cases
+    const callerRoles = await permissionService.getUserRoles(userId);
+    if (!callerRoles.includes('LAND_OFFICER')) {
+      throw new ForbiddenError(
+        'Forbidden: Only a Land Officer may create acquisition cases'
+      );
+    }
+
     // 2. Validate project exists
     const project = await projectRepository.findProjectById(input.projectId);
     if (!project) {
       throw new BadRequestError(`Project with ID '${input.projectId}' not found`);
+    }
+
+    // 2b. Project status check: Acquisition cases can only be created for projects in REGISTERED status
+    if (project.status !== 'REGISTERED') {
+      throw new BadRequestError(
+        `Cannot create acquisition case: linked project status is '${project.status}'. Acquisition cases can only be created for projects with 'REGISTERED' status.`
+      );
     }
 
     // 3. Administrative scope check on linked project's administrative unit
@@ -215,6 +230,15 @@ export class AcquisitionCaseService {
     // 1. Permission check
     await permissionService.requirePermission(userId, 'ACQUISITION_CASE_UPDATE');
 
+    // 1b. Role restriction — only LAND_OFFICER may edit acquisition cases
+    const isSuperUpdate = await permissionService.isSuperAdmin(userId);
+    const updateRoles = await permissionService.getUserRoles(userId);
+    if (!isSuperUpdate && !updateRoles.includes('LAND_OFFICER')) {
+      throw new ForbiddenError(
+        'Forbidden: Only a Land Officer may edit acquisition cases'
+      );
+    }
+
     const acqCase = await acquisitionCaseRepository.findCaseById(id);
     if (!acqCase) {
       throw new NotFoundError(`Acquisition case with ID '${id}' not found`);
@@ -265,6 +289,15 @@ export class AcquisitionCaseService {
   ): Promise<AcquisitionCaseWithRelations> {
     // 1. Permission check
     await permissionService.requirePermission(userId, 'ACQUISITION_CASE_SUBMIT');
+
+    // 1b. Role restriction — only LAND_OFFICER may submit acquisition cases for review
+    const isSuperSubmit = await permissionService.isSuperAdmin(userId);
+    const submitRoles = await permissionService.getUserRoles(userId);
+    if (!isSuperSubmit && !submitRoles.includes('LAND_OFFICER')) {
+      throw new ForbiddenError(
+        'Forbidden: Only a Land Officer may submit acquisition cases for review'
+      );
+    }
 
     const acqCase = await acquisitionCaseRepository.findCaseById(id);
     if (!acqCase) {
@@ -373,7 +406,44 @@ export class AcquisitionCaseService {
       );
     }
 
-    // 3. Map decision to target status and action
+    // 3. Separation-of-duties: reviewer cannot be the project creator or the case preparer
+    if (userId === acqCase.project.createdBy) {
+      throw new ForbiddenError(
+        'Forbidden: The project creator cannot review the acquisition case linked to their own project'
+      );
+    }
+    if (userId === acqCase.createdBy) {
+      throw new ForbiddenError(
+        'Forbidden: The Land Officer who prepared this acquisition case cannot review it'
+      );
+    }
+
+    // 4. Counterpart-role enforcement:
+    //    If project was created by PROJECT_OFFICER ⇒ reviewer must have MINISTRY_ADMIN.
+    //    If project was created by MINISTRY_ADMIN ⇒ reviewer must have PROJECT_OFFICER.
+    //    SUPER_ADMIN does NOT bypass this separation-of-duties rule.
+    const projectCreatorRoles = await permissionService.getUserRoles(acqCase.project.createdBy);
+    const reviewerRoles = await permissionService.getUserRoles(userId);
+
+    let requiredCounterpartRole: string | null = null;
+    if (projectCreatorRoles.includes('PROJECT_OFFICER')) {
+      requiredCounterpartRole = 'MINISTRY_ADMIN';
+    } else if (projectCreatorRoles.includes('MINISTRY_ADMIN')) {
+      requiredCounterpartRole = 'PROJECT_OFFICER';
+    }
+
+    if (requiredCounterpartRole) {
+      if (!reviewerRoles.includes(requiredCounterpartRole)) {
+        throw new ForbiddenError(
+          `Forbidden: Independent counterpart-role review is required. ` +
+          `This project was created by a ${projectCreatorRoles.includes('PROJECT_OFFICER') ? 'Project Officer' : 'Ministry Admin'}, ` +
+          `so the reviewer must hold the '${requiredCounterpartRole}' role. ` +
+          `Your current roles do not include '${requiredCounterpartRole}'.`
+        );
+      }
+    }
+
+    // 5. Map decision to target status and action
     let toStatus: AcquisitionCaseStatus;
     const action = input.decision;
 
@@ -394,7 +464,7 @@ export class AcquisitionCaseService {
 
     const effectiveRemarks = (input.remarks ?? input.reason ?? '').trim() || null;
 
-    // 4. Atomic transaction with row locking to prevent concurrent / duplicate review decisions
+    // 6. Atomic transaction with row locking to prevent concurrent / duplicate review decisions
     await db.transaction(async (tx) => {
       // Row lock the acquisition case
       const [lockedCase] = await tx
@@ -402,6 +472,7 @@ export class AcquisitionCaseService {
           id: acquisitionCases.id,
           caseReference: acquisitionCases.caseReference,
           status: acquisitionCases.status,
+          projectId: acquisitionCases.projectId,
         })
         .from(acquisitionCases)
         .where(eq(acquisitionCases.id, id))
@@ -431,6 +502,14 @@ export class AcquisitionCaseService {
         },
         tx
       );
+
+      // If returning for correction, unlock the linked project for editing by its original creator
+      if (toStatus === 'RETURNED_FOR_CORRECTION') {
+        // Import dynamically to avoid circular dependency at module level
+        const { projectService } = await import('../projects/project.service');
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await projectService.unlockForCorrection(lockedCase.projectId, id, tx as any);
+      }
 
       // Persist workflow history entry
       await acquisitionCaseRepository.createWorkflowHistory(

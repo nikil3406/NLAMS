@@ -15,6 +15,7 @@ interface ProjectDetailsClientProps {
 
 export function ProjectDetailsClient({
   projectId,
+  currentUserId,
   userPermissions,
   isSuperAdmin,
 }: ProjectDetailsClientProps) {
@@ -27,6 +28,7 @@ export function ProjectDetailsClient({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [actionSuccessMessage, setActionSuccessMessage] = useState<string | null>(null);
   const [isActionLoading, setIsActionLoading] = useState(false);
+  const [isResubmitting, setIsResubmitting] = useState(false);
 
   // Status transition modal state
   const [statusModalTarget, setStatusModalTarget] = useState<ProjectStatus | null>(null);
@@ -91,6 +93,32 @@ export function ProjectDetailsClient({
       );
     } finally {
       setIsActionLoading(false);
+    }
+  };
+
+  const handleResubmit = async () => {
+    if (!window.confirm('Submit project corrections? This will lock project editing and notify the Land Officer to resubmit the case.')) {
+      return;
+    }
+    setIsResubmitting(true);
+    setActionSuccessMessage(null);
+    setErrorMessage(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/resubmit`, {
+        method: 'POST',
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || 'Failed to submit project corrections');
+      }
+      setProject(json.data);
+      setActionSuccessMessage('Project corrections submitted successfully. The acquisition case can now be resubmitted.');
+    } catch (err: unknown) {
+      setErrorMessage(
+        err instanceof Error ? err.message : 'Correction submission failed'
+      );
+    } finally {
+      setIsResubmitting(false);
     }
   };
 
@@ -180,7 +208,14 @@ export function ProjectDetailsClient({
 
   if (!project) return null;
 
+  const isCreator = project.createdBy === currentUserId;
   const isTerminal = project.status === 'COMPLETED' || project.status === 'CANCELLED';
+  const isUnderCorrection = Boolean(project.correctionPendingFor);
+  const isEditableStatus = project.status === 'DRAFT' || isUnderCorrection;
+
+  // Strict ownership enforcement: Only the original creator may edit or register
+  const canEditProject = isCreator && canUpdate && !isTerminal && isEditableStatus;
+  const canRegisterProject = isCreator && canRegister && project.status === 'DRAFT';
 
   return (
     <div className="users-page project-details-page">
@@ -215,7 +250,7 @@ export function ProjectDetailsClient({
 
         {/* Action Buttons */}
         <div className="page-actions-group" style={{ flexShrink: 0 }}>
-          {canUpdate && !isTerminal && (
+          {canEditProject && (
             <Link
               href={`/projects/${project.id}/edit`}
               className="btn-secondary"
@@ -229,8 +264,8 @@ export function ProjectDetailsClient({
             </Link>
           )}
 
-          {/* Registration Action */}
-          {project.status === 'DRAFT' && canRegister && (
+          {/* Registration Action — only creator can register */}
+          {canRegisterProject && (
             <button
               type="button"
               className="btn-primary"
@@ -249,7 +284,7 @@ export function ProjectDetailsClient({
           {/* Status Transitions */}
           {canUpdate && !isTerminal && (
             <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-              {project.status === 'DRAFT' && (
+              {project.status === 'DRAFT' && isCreator && (
                 <button
                   type="button"
                   className="btn-cancel"
@@ -336,6 +371,75 @@ export function ProjectDetailsClient({
             <line x1="12" y1="16" x2="12.01" y2="16" />
           </svg>
           <span>{errorMessage}</span>
+        </div>
+      )}
+
+      {/* Ownership & Correction Status Banners */}
+      {isUnderCorrection && isCreator && (
+        <div
+          style={{
+            background: 'rgba(234, 179, 8, 0.1)',
+            border: '1px solid rgba(234, 179, 8, 0.3)',
+            borderRadius: '8px',
+            padding: '0.875rem 1.25rem',
+            marginBottom: '1.5rem',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '1rem',
+            flexWrap: 'wrap',
+          }}
+          id="project-correction-cycle-banner"
+        >
+          <div style={{ fontSize: '0.875rem', color: '#fde047', lineHeight: '1.5', flex: 1, minWidth: '240px' }}>
+            <strong>Correction Cycle Active:</strong> An acquisition case returned for correction requires changes to this project. As the original creator, you may edit project details and submit corrections when finished.
+          </div>
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={handleResubmit}
+            disabled={isResubmitting}
+            id="btn-resubmit-project"
+            style={{ backgroundColor: '#eab308', color: '#0f172a', fontWeight: 600, border: 'none', padding: '0.5rem 1rem' }}
+          >
+            <span>{isResubmitting ? 'Submitting...' : 'Submit Corrections'}</span>
+          </button>
+        </div>
+      )}
+
+      {isUnderCorrection && !isCreator && (
+        <div
+          style={{
+            background: 'rgba(234, 179, 8, 0.08)',
+            border: '1px solid rgba(234, 179, 8, 0.25)',
+            borderRadius: '8px',
+            padding: '0.75rem 1rem',
+            marginBottom: '1.5rem',
+            fontSize: '0.8125rem',
+            color: '#fef08a',
+            lineHeight: '1.5',
+          }}
+          id="project-correction-readonly-banner"
+        >
+          <strong>Correction Cycle Active:</strong> This project is currently unlocked for corrections by its original creator ({project.creator?.name ?? 'Project Creator'}). You cannot edit or submit corrections for this project.
+        </div>
+      )}
+
+      {project.status === 'DRAFT' && !isCreator && (
+        <div
+          style={{
+            background: 'rgba(100, 116, 139, 0.08)',
+            border: '1px solid rgba(100, 116, 139, 0.2)',
+            borderRadius: '8px',
+            padding: '0.75rem 1rem',
+            marginBottom: '1.5rem',
+            fontSize: '0.8125rem',
+            color: 'var(--text-secondary)',
+            lineHeight: '1.5',
+          }}
+          id="project-draft-readonly-banner"
+        >
+          <strong>Draft Project (Read-Only):</strong> This project was prepared by {project.creator?.name ?? 'another official'}. Only the original project creator may edit or formally register this project.
         </div>
       )}
 

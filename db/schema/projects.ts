@@ -14,6 +14,7 @@ import { relations } from 'drizzle-orm';
 import { implementingAgencies } from './implementing-agencies';
 import { administrativeUnits } from './administrative-units';
 import { users } from './users';
+// Note: acquisitionCases is imported lazily inside the relation definition to avoid circular imports
 
 export const PROJECT_TYPES = [
   'Highway',
@@ -62,6 +63,12 @@ export const projects = pgTable(
     plannedStartDate: date('planned_start_date'),
     plannedEndDate: date('planned_end_date'),
     status: varchar('status', { length: 50 }).default('DRAFT').notNull(),
+    /**
+     * When non-null, the project has been unlocked for editing by the original creator
+     * to address a correction request raised by the referenced acquisition case reviewer.
+     * Set to null once the creator resubmits the project for the correction cycle.
+     */
+    correctionPendingFor: uuid('correction_pending_for'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },

@@ -7,7 +7,7 @@ import { projectRepository } from '../../repositories/project.repository';
 import { permissionService } from '../authorization/permission.service';
 import { scopeService } from '../authorization/scope.service';
 import type { ProjectBoundaryInput, GeoJsonGeometry } from '../../validators/spatial/boundary.schema';
-import { BadRequestError, NotFoundError } from '../../types';
+import { BadRequestError, NotFoundError, ForbiddenError } from '../../types';
 
 export class ProjectBoundaryService {
   /**
@@ -66,6 +66,21 @@ export class ProjectBoundaryService {
     );
     if (!inScope) {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
+    }
+
+    // Ownership check — only the original creator may update a boundary.
+    if (project.createdBy !== userId) {
+      throw new ForbiddenError(
+        'Forbidden: Only the original project creator may update the project boundary'
+      );
+    }
+
+    // Workflow-state editability: allowed only in DRAFT or during an active correction cycle.
+    const isUnderCorrection = project.correctionPendingFor !== null;
+    if (!isUnderCorrection && project.status !== 'DRAFT') {
+      throw new BadRequestError(
+        `Cannot modify project boundary: editing is only permitted in 'DRAFT' status or during an authorized correction cycle`
+      );
     }
 
     if (project.status === 'COMPLETED' || project.status === 'CANCELLED') {

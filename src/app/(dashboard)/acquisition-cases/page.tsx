@@ -17,11 +17,13 @@ export default async function AcquisitionCasesPage() {
 
   const authContext = await authorizationService.getUserAuthorizationContext(user.id);
   const userPermissions = authContext?.permissions ?? [];
+  const userRoles = authContext?.roles ?? [];
   const isSuperAdmin = authContext?.isSuperAdmin ?? false;
 
   return (
     <AcquisitionCasesClient
       userPermissions={userPermissions}
+      userRoles={userRoles}
       isSuperAdmin={isSuperAdmin}
       currentUserId={user.id}
     />

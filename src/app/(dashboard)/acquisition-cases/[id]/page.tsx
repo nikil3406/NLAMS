@@ -22,6 +22,7 @@ export default async function AcquisitionCaseDetailsPage({ params }: PageProps) 
   const { id } = await params;
   const authContext = await authorizationService.getUserAuthorizationContext(user.id);
   const userPermissions = authContext?.permissions ?? [];
+  const userRoles = authContext?.roles ?? [];
   const isSuperAdmin = authContext?.isSuperAdmin ?? false;
 
   return (
@@ -29,6 +30,7 @@ export default async function AcquisitionCaseDetailsPage({ params }: PageProps) 
       caseId={id}
       currentUserId={user.id}
       userPermissions={userPermissions}
+      userRoles={userRoles}
       isSuperAdmin={isSuperAdmin}
     />
   );

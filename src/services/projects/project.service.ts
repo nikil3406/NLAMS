@@ -1,4 +1,6 @@
+import { eq } from 'drizzle-orm';
 import { db } from '../../../db';
+import { projects } from '../../../db/schema/projects';
 import {
   projectRepository,
   type ProjectFilterOptions,
@@ -22,6 +24,7 @@ import type { ProjectStatus } from '../../../db/schema/projects';
 import {
   BadRequestError,
   NotFoundError,
+  ForbiddenError,
 } from '../../types';
 
 export interface PaginatedProjectsResult {
@@ -46,8 +49,8 @@ const VALID_TRANSITIONS: Record<ProjectStatus, ProjectStatus[]> = {
 export class ProjectService {
   /**
    * Creates a new project in DRAFT status.
-   * Enforces PROJECT_CREATE permission, administrative scope, active agency check,
-   * and concurrency-safe code generation.
+   * Enforces PROJECT_CREATE permission, role restriction (PROJECT_OFFICER or MINISTRY_ADMIN),
+   * administrative scope, active agency check, and concurrency-safe code generation.
    */
   async createProject(
     input: CreateProjectInput,
@@ -55,6 +58,19 @@ export class ProjectService {
   ): Promise<ProjectWithRelations> {
     // 1. Permission check
     await permissionService.requirePermission(userId, 'PROJECT_CREATE');
+
+    // 1b. Role restriction — only PROJECT_OFFICER or MINISTRY_ADMIN may create projects (SUPER_ADMIN also allowed)
+    const isSuper = await permissionService.isSuperAdmin(userId);
+    const creatorRoles = await permissionService.getUserRoles(userId);
+    const isEligibleCreator =
+      isSuper ||
+      creatorRoles.includes('PROJECT_OFFICER') ||
+      creatorRoles.includes('MINISTRY_ADMIN');
+    if (!isEligibleCreator) {
+      throw new ForbiddenError(
+        'Forbidden: Only a Project Officer or Ministry Admin may create projects'
+      );
+    }
 
     // 2. Administrative scope check
     await scopeService.requireAdministrativeScope(userId, input.administrativeUnitId);
@@ -237,6 +253,9 @@ export class ProjectService {
 
   /**
    * Updates permitted project fields.
+   * Only the original project creator may update a project.
+   * Updates are permitted when the project is in DRAFT status, or when the project
+   * has been explicitly unlocked for a correction cycle (correctionPendingFor is non-null).
    * Status and immutable identifiers cannot be updated here.
    */
   async updateProject(
@@ -261,7 +280,26 @@ export class ProjectService {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
 
-    // 3. Reject modification of terminal projects
+    // 3. Ownership check — only the original creator may edit. SUPER_ADMIN does NOT bypass this.
+    if (project.createdBy !== userId) {
+      throw new ForbiddenError(
+        'Forbidden: Only the original project creator may edit project details'
+      );
+    }
+
+    // 4. Workflow-state editability check:
+    //    Allowed when project is DRAFT, or when a correction cycle has been explicitly unlocked.
+    const isUnderCorrection = project.correctionPendingFor !== null;
+    if (
+      !isUnderCorrection &&
+      project.status !== 'DRAFT'
+    ) {
+      throw new BadRequestError(
+        `Cannot modify project: editing is only permitted when the project is in 'DRAFT' status or during an authorized correction cycle`
+      );
+    }
+
+    // 5. Reject modification of terminal projects
     if (project.status === 'COMPLETED' || project.status === 'CANCELLED') {
       throw new BadRequestError(`Cannot modify a project in '${project.status}' status`);
     }
@@ -332,6 +370,13 @@ export class ProjectService {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
 
+    // Ownership check — only the original project creator may register the project
+    if (project.createdBy !== userId) {
+      throw new ForbiddenError(
+        'Forbidden: Only the project creator may register this project'
+      );
+    }
+
     if (project.status !== 'DRAFT') {
       throw new BadRequestError(`Cannot register project: project status is '${project.status}', expected 'DRAFT'`);
     }
@@ -385,9 +430,14 @@ export class ProjectService {
       );
     }
 
-    // Registration requires PROJECT_REGISTER permission
+    // Registration requires PROJECT_REGISTER permission and project creator ownership
     if (targetStatus === 'REGISTERED') {
       await permissionService.requirePermission(userId, 'PROJECT_REGISTER');
+      if (project.createdBy !== userId) {
+        throw new ForbiddenError(
+          'Forbidden: Only the project creator may register this project'
+        );
+      }
     } else {
       // Other status transitions require PROJECT_UPDATE
       await permissionService.requirePermission(userId, 'PROJECT_UPDATE');
@@ -400,6 +450,76 @@ export class ProjectService {
     const updated = await projectRepository.findProjectById(projectId);
     if (!updated) {
       throw new Error('Failed to retrieve updated project record');
+    }
+
+    return updated;
+  }
+
+  /**
+   * Unlocks a project for editing by its original creator to address a correction
+   * request raised during acquisition-case review.
+   *
+   * Called atomically from within an acquisition-case review transaction.
+   * The caseId is stored in correctionPendingFor to track the active correction cycle.
+   */
+  async unlockForCorrection(
+    projectId: string,
+    caseId: string,
+    txClient?: Parameters<Parameters<typeof db.transaction>[0]>[0]
+  ): Promise<void> {
+    const executor = (txClient ?? db) as typeof db;
+    await executor
+      .update(projects)
+      .set({ correctionPendingFor: caseId, updatedAt: new Date() })
+      .where(eq(projects.id, projectId));
+  }
+
+  /**
+   * Called by the original project creator to signal that the correction has been
+   * addressed and the project is ready for the Land Officer to resubmit the acquisition case.
+   *
+   * Clears the correctionPendingFor flag, ending the creator-editable correction window.
+   * The project must currently have correctionPendingFor set and belong to the caller.
+   */
+  async resubmitAfterCorrection(
+    projectId: string,
+    userId: string
+  ): Promise<ProjectWithRelations> {
+    await permissionService.requirePermission(userId, 'PROJECT_UPDATE');
+
+    const project = await projectRepository.findProjectById(projectId);
+    if (!project) {
+      throw new NotFoundError(`Project with ID '${projectId}' not found`);
+    }
+
+    const inScope = await scopeService.isWithinAdministrativeScope(
+      userId,
+      project.administrativeUnitId
+    );
+    if (!inScope) {
+      throw new NotFoundError(`Project with ID '${projectId}' not found`);
+    }
+
+    if (project.createdBy !== userId) {
+      throw new ForbiddenError(
+        'Forbidden: Only the original project creator may resubmit after correction'
+      );
+    }
+
+    if (!project.correctionPendingFor) {
+      throw new BadRequestError(
+        'This project does not have an active correction cycle. No resubmission is needed.'
+      );
+    }
+
+    await projectRepository.updateProject(projectId, {
+      correctionPendingFor: null,
+      updatedAt: new Date(),
+    });
+
+    const updated = await projectRepository.findProjectById(projectId);
+    if (!updated) {
+      throw new Error('Failed to retrieve project after correction resubmission');
     }
 
     return updated;

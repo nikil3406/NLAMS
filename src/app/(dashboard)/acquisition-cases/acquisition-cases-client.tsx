@@ -7,6 +7,7 @@ import type { AcquisitionCaseStatus } from '../../../../db/schema/acquisition-ca
 
 interface AcquisitionCasesClientProps {
   userPermissions: string[];
+  userRoles: string[];
   isSuperAdmin: boolean;
   currentUserId: string;
 }
@@ -49,9 +50,13 @@ const STATUS_BADGE_STYLES: Record<
 
 export function AcquisitionCasesClient({
   userPermissions,
+  userRoles,
   isSuperAdmin,
 }: AcquisitionCasesClientProps) {
-  const canCreate = isSuperAdmin || userPermissions.includes('ACQUISITION_CASE_CREATE');
+  // Only LAND_OFFICER may create acquisition cases (enforced on backend; reflected in UI)
+  const canCreate =
+    userRoles.includes('LAND_OFFICER') &&
+    (isSuperAdmin || userPermissions.includes('ACQUISITION_CASE_CREATE'));
 
   const [cases, setCases] = useState<AcquisitionCaseWithRelations[]>([]);
   const [total, setTotal] = useState(0);

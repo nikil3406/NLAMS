@@ -30,9 +30,9 @@ export function NewAcquisitionCaseClient({}: NewAcquisitionCaseClientProps) {
       setIsLoadingProjects(true);
       setLoadError(null);
       try {
-        const res = await fetch('/api/projects?limit=100');
+        const res = await fetch('/api/projects?status=REGISTERED&limit=100');
         if (!res.ok) {
-          throw new Error('Failed to load accessible projects in your administrative scope');
+          throw new Error('Failed to load registered projects in your administrative scope');
         }
         const json = await res.json();
         if (json.success) {
@@ -187,9 +187,9 @@ export function NewAcquisitionCaseClient({}: NewAcquisitionCaseClientProps) {
           <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
           </svg>
-          <p style={{ fontWeight: 600, color: '#fff', fontSize: '0.9375rem' }}>No Accessible Projects</p>
+          <p style={{ fontWeight: 600, color: '#fff', fontSize: '0.9375rem' }}>No Registered Projects</p>
           <p style={{ fontSize: '0.8125rem', maxWidth: '420px', margin: '0 auto', lineHeight: 1.5 }}>
-            No projects were found in your authorized administrative scope. An acquisition case must be linked to an existing project.
+            No registered projects were found in your authorized administrative scope. Acquisition cases can only be created for projects in <strong>REGISTERED</strong> status. Ensure the project is formally registered first.
           </p>
           <Link href="/projects/new" className="btn-primary" style={{ marginTop: '0.5rem' }}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
