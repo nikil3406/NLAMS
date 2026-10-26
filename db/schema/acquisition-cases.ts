@@ -10,6 +10,7 @@ import {
 import { relations } from 'drizzle-orm';
 import { projects } from './projects';
 import { users } from './users';
+import { acquisitionCaseParcels } from './acquisition-case-parcels';
 
 export const ACQUISITION_CASE_STATUSES = [
   'DRAFT',
@@ -93,6 +94,7 @@ export const acquisitionCasesRelations = relations(acquisitionCases, ({ one, man
     relationName: 'caseUpdater',
   }),
   workflowHistory: many(acquisitionCaseWorkflowHistory),
+  parcels: many(acquisitionCaseParcels),
 }));
 
 export const acquisitionCaseWorkflowHistoryRelations = relations(

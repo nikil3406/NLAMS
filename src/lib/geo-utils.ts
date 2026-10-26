@@ -64,6 +64,29 @@ export function calculateGeodesicAreaSqm(
 }
 
 /**
+ * Converts area from specified unit to square meters.
+ */
+export function convertAreaToSqm(
+  area: number,
+  sourceUnit: string
+): number {
+  switch (sourceUnit) {
+    case 'HECTARE':
+    case 'HECTARES':
+    case 'HA':
+      return area * 10000;
+    case 'ACRE':
+    case 'ACRES':
+      return area * 4046.8564224;
+    case 'SQ_KM':
+      return area * 1000000;
+    case 'SQ_M':
+    default:
+      return area;
+  }
+}
+
+/**
  * Converts area in square meters to specified unit.
  */
 export function convertAreaFromSqm(

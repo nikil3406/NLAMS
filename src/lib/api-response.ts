@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { ZodError } from 'zod';
 import { AuthenticationError } from '../services/auth';
 import {
   BadRequestError,
@@ -54,6 +55,21 @@ export function handleApiError(error: unknown): NextResponse {
   ) {
     return NextResponse.json(
       { success: false, error: (error as Error).message },
+      { status: 400 }
+    );
+  }
+
+  if (
+    error instanceof ZodError ||
+    (error as { name?: string }).name === 'ZodError'
+  ) {
+    const issue = (error as ZodError).issues?.[0];
+    return NextResponse.json(
+      {
+        success: false,
+        error: issue?.message ?? 'Validation failed',
+        issues: (error as ZodError).issues,
+      },
       { status: 400 }
     );
   }
