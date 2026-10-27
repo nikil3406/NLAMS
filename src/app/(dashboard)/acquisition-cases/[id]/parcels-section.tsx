@@ -9,6 +9,7 @@ import { ParcelDetailModal } from './parcel-detail-modal';
 interface ParcelsSectionProps {
   caseId: string;
   caseStatus: string;
+  currentUserId?: string;
   userRoles: string[];
   isSuperAdmin: boolean;
   projectLocality?: {
@@ -21,6 +22,7 @@ interface ParcelsSectionProps {
 export function ParcelsSection({
   caseId,
   caseStatus,
+  currentUserId,
   userRoles,
   isSuperAdmin,
   projectLocality,
@@ -443,6 +445,15 @@ export function ParcelsSection({
                           >
                             View
                           </button>
+                          <button
+                            type="button"
+                            onClick={() => setViewingParcel(item)}
+                            className="btn-secondary"
+                            style={{ padding: '0.25rem 0.6rem', fontSize: '0.75rem', borderColor: 'rgba(56, 189, 248, 0.4)', color: '#38bdf8' }}
+                            id={`reports-parcel-${parcel.parcelId}-btn`}
+                          >
+                            📋 Reports
+                          </button>
                           {canAddOrEdit && (
                             <button
                               type="button"
@@ -490,6 +501,10 @@ export function ParcelsSection({
       {viewingParcel && (
         <ParcelDetailModal
           item={viewingParcel}
+          caseId={caseId}
+          caseStatus={caseStatus}
+          currentUserId={currentUserId}
+          userRoles={userRoles}
           canEdit={canAddOrEdit}
           onClose={() => setViewingParcel(null)}
           onOpenEdit={() => {

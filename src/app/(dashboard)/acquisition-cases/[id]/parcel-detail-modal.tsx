@@ -1,10 +1,15 @@
-'use client';
-
-import React from 'react';
+import React, { useState } from 'react';
 import type { CaseParcelWithDetails } from '../../../../repositories/parcel.repository';
+import type { FieldVerificationReportWithDetails } from '../../../../repositories/field-verification-report.repository';
+import { ParcelReportsSection } from './parcel-reports-section';
+import { FieldReportModal } from './field-report-modal';
 
 interface ParcelDetailModalProps {
   item: CaseParcelWithDetails;
+  caseId?: string;
+  caseStatus?: string;
+  currentUserId?: string;
+  userRoles?: string[];
   canEdit: boolean;
   onClose: () => void;
   onOpenEdit: () => void;
@@ -12,11 +17,21 @@ interface ParcelDetailModalProps {
 
 export function ParcelDetailModal({
   item,
+  caseId,
+  caseStatus,
+  currentUserId,
+  userRoles,
   canEdit,
   onClose,
   onOpenEdit,
 }: ParcelDetailModalProps) {
   const { parcel, creator } = item;
+  const [activeReportModal, setActiveReportModal] = useState<{
+    isOpen: boolean;
+    reportId?: string | null;
+    reportData?: FieldVerificationReportWithDetails | null;
+  }>({ isOpen: false });
+  const [reportsRefreshTrigger, setReportsRefreshTrigger] = useState(0);
 
   return (
     <div
@@ -223,6 +238,21 @@ export function ParcelDetailModal({
               </div>
             </div>
           </div>
+
+          {/* Section E: Field Verification Reports */}
+          {caseId && (
+            <ParcelReportsSection
+              caseId={caseId}
+              caseParcel={item}
+              caseStatus={caseStatus || 'AWAITING_FIELD_VERIFICATION'}
+              currentUserId={currentUserId || ''}
+              userRoles={userRoles || []}
+              onOpenReportModal={(reportId, reportData) => {
+                setActiveReportModal({ isOpen: true, reportId, reportData });
+              }}
+              refreshTrigger={reportsRefreshTrigger}
+            />
+          )}
         </div>
 
         {/* Footer */}
@@ -255,6 +285,27 @@ export function ParcelDetailModal({
           )}
         </div>
       </div>
+
+      {/* Field Report Modal */}
+      {activeReportModal.isOpen && caseId && (
+        <FieldReportModal
+          caseId={caseId}
+          caseParcel={item}
+          reportId={activeReportModal.reportId}
+          initialReport={activeReportModal.reportData}
+          caseStatus={caseStatus || 'AWAITING_FIELD_VERIFICATION'}
+          currentUserId={currentUserId || ''}
+          userRoles={userRoles || []}
+          onClose={() => setActiveReportModal({ isOpen: false })}
+          onReportSaved={() => {
+            setReportsRefreshTrigger((prev) => prev + 1);
+          }}
+          onFollowUpInspection={() => {
+            setActiveReportModal({ isOpen: true, reportId: null, reportData: null });
+          }}
+        />
+      )}
     </div>
   );
 }
+

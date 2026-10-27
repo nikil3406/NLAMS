@@ -923,6 +923,7 @@ export function AcquisitionCaseDetailsClient({
         <ParcelsSection
           caseId={caseId}
           caseStatus={acqCase.status}
+          currentUserId={currentUserId}
           userRoles={userRoles}
           isSuperAdmin={isSuperAdmin}
           projectLocality={{
