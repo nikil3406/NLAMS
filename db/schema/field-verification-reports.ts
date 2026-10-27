@@ -94,9 +94,11 @@ export const fieldVerificationReports = pgTable(
   ]
 );
 
+import { fieldVerificationEvidence } from './field-verification-evidence';
+
 export const fieldVerificationReportsRelations = relations(
   fieldVerificationReports,
-  ({ one }) => ({
+  ({ one, many }) => ({
     caseParcel: one(acquisitionCaseParcels, {
       fields: [fieldVerificationReports.caseParcelId],
       references: [acquisitionCaseParcels.id],
@@ -111,6 +113,7 @@ export const fieldVerificationReportsRelations = relations(
       references: [users.id],
       relationName: 'reportCreator',
     }),
+    evidence: many(fieldVerificationEvidence),
   })
 );
 

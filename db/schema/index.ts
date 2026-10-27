@@ -14,3 +14,4 @@ export * from './acquisition-cases';
 export * from './land-parcels';
 export * from './acquisition-case-parcels';
 export * from './field-verification-reports';
+export * from './field-verification-evidence';

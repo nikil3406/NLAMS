@@ -100,6 +100,7 @@ async function verify() {
     'land_parcels',
     'acquisition_case_parcels',
     'field_verification_reports',
+    'field_verification_evidence',
   ];
 
   console.log('\n  Tables:');

@@ -7,3 +7,5 @@ export * from './user-assignment.repository';
 export * from './implementing-agency.repository';
 export * from './project.repository';
 export * from './acquisition-case.repository';
+export * from './parcel.repository';
+export * from './field-verification-report.repository';
