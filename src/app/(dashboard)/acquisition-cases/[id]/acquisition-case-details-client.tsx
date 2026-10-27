@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import type { AcquisitionCaseWithRelations } from '../../../../repositories/acquisition-case.repository';
 import type { AcquisitionCaseStatus } from '../../../../../db/schema/acquisition-cases';
+import { ParcelsSection } from './parcels-section';
 
 interface AcquisitionCaseDetailsClientProps {
   caseId: string;
@@ -68,6 +69,10 @@ export function AcquisitionCaseDetailsClient({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
+  // Tab Navigation State
+  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'PARCELS'>('OVERVIEW');
+  const [parcelCount, setParcelCount] = useState<number>(0);
+
   // Edit Modal State
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editTitle, setEditTitle] = useState('');
@@ -107,6 +112,16 @@ export function AcquisitionCaseDetailsClient({
       const json = await res.json();
       if (json.success) {
         setAcqCase(json.data);
+        // Also fetch initial parcel count
+        try {
+          const parcelsRes = await fetch(`/api/acquisition-cases/${caseId}/parcels?limit=1`);
+          if (parcelsRes.ok) {
+            const parcelsJson = await parcelsRes.json();
+            if (parcelsJson.pagination) {
+              setParcelCount(parcelsJson.pagination.total);
+            }
+          }
+        } catch {}
       } else {
         throw new Error(json.error || 'Failed to load case');
       }
@@ -623,8 +638,76 @@ export function AcquisitionCaseDetailsClient({
         </div>
       )}
 
-      {/* Two Column Overview */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
+      {/* Tab Navigation: Overview & History vs Land Parcels */}
+      <div
+        style={{
+          display: 'flex',
+          gap: '0.5rem',
+          borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+          marginBottom: '1.75rem',
+        }}
+        id="case-details-tab-bar"
+      >
+        <button
+          type="button"
+          onClick={() => setActiveTab('OVERVIEW')}
+          style={{
+            padding: '0.625rem 1.25rem',
+            background: 'transparent',
+            border: 'none',
+            borderBottom: activeTab === 'OVERVIEW' ? '2px solid #3b82f6' : '2px solid transparent',
+            color: activeTab === 'OVERVIEW' ? '#60a5fa' : '#94a3b8',
+            fontWeight: 600,
+            fontSize: '0.875rem',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+          }}
+          id="tab-btn-overview"
+        >
+          <span>Case Overview & History</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('PARCELS')}
+          style={{
+            padding: '0.625rem 1.25rem',
+            background: 'transparent',
+            border: 'none',
+            borderBottom: activeTab === 'PARCELS' ? '2px solid #3b82f6' : '2px solid transparent',
+            color: activeTab === 'PARCELS' ? '#60a5fa' : '#94a3b8',
+            fontWeight: 600,
+            fontSize: '0.875rem',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+          }}
+          id="tab-btn-parcels"
+        >
+          <span>Land Parcels</span>
+          <span
+            style={{
+              background: activeTab === 'PARCELS' ? 'rgba(59, 130, 246, 0.25)' : 'rgba(255, 255, 255, 0.08)',
+              color: activeTab === 'PARCELS' ? '#93c5fd' : '#cbd5e1',
+              borderRadius: '9999px',
+              padding: '0.1rem 0.5rem',
+              fontSize: '0.6875rem',
+              fontWeight: 700,
+            }}
+            id="tab-parcels-count"
+          >
+            {parcelCount}
+          </span>
+        </button>
+      </div>
+
+      {activeTab === 'OVERVIEW' && (
+        <>
+          {/* Two Column Overview */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
         {/* Linked Project Card */}
         <div
           style={{
@@ -833,6 +916,22 @@ export function AcquisitionCaseDetailsClient({
           </div>
         )}
       </div>
+      </>
+      )}
+
+      {activeTab === 'PARCELS' && (
+        <ParcelsSection
+          caseId={caseId}
+          caseStatus={acqCase.status}
+          userRoles={userRoles}
+          isSuperAdmin={isSuperAdmin}
+          projectLocality={{
+            state: 'Karnataka',
+            district: acqCase.project.administrativeUnit?.name,
+          }}
+          onCountChange={(cnt) => setParcelCount(cnt)}
+        />
+      )}
 
       {/* Edit Case Modal */}
       {isEditModalOpen && (
