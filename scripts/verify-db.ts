@@ -101,6 +101,7 @@ async function verify() {
     'acquisition_case_parcels',
     'field_verification_reports',
     'field_verification_evidence',
+    'field_verification_report_reviews',
   ];
 
   console.log('\n  Tables:');

@@ -4,6 +4,7 @@ import {
   FIELD_VERIFICATION_REPORT_STATUSES,
 } from '../../../db/schema/field-verification-reports';
 import { FIELD_VERIFICATION_EVIDENCE_TYPES } from '../../../db/schema/field-verification-evidence';
+import { FIELD_VERIFICATION_REVIEW_DECISIONS } from '../../../db/schema/field-verification-report-reviews';
 
 export const SUPPORTED_AREA_UNITS = ['SQ_M', 'HECTARE', 'ACRE', 'SQ_KM'] as const;
 
@@ -183,3 +184,54 @@ export const listFieldVerificationReportsQuerySchema = z.object({
 export type ListFieldVerificationReportsQuery = z.infer<
   typeof listFieldVerificationReportsQuerySchema
 >;
+
+/**
+ * Schema for formal Land Officer review decision on a submitted field verification report.
+ */
+export const reviewFieldVerificationReportSchema = z
+  .object({
+    decision: z.enum(FIELD_VERIFICATION_REVIEW_DECISIONS, {
+      errorMap: () => ({
+        message: `decision must be one of: ${FIELD_VERIFICATION_REVIEW_DECISIONS.join(', ')}`,
+      }),
+    }),
+    remarks: z.string().max(2000).optional().nullable(),
+  })
+  .superRefine((data, ctx) => {
+    const trimmedRemarks = data.remarks?.trim() ?? '';
+    if (data.decision === 'RETURNED_FOR_CORRECTION' && trimmedRemarks.length < 5) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Remarks explaining correction requirements are mandatory when returning a report for correction (minimum 5 characters)',
+        path: ['remarks'],
+      });
+    }
+    if (data.decision === 'DISCREPANCY_FLAGGED' && trimmedRemarks.length < 5) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'A reason or remarks explaining the discrepancy are mandatory when flagging a report (minimum 5 characters)',
+        path: ['remarks'],
+      });
+    }
+  });
+
+export type ReviewFieldVerificationReportInput = z.infer<
+  typeof reviewFieldVerificationReportSchema
+>;
+
+/**
+ * Query schema for review queue listing.
+ */
+export const listReviewQueueQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(10),
+  reviewStatus: z
+    .enum(['SUBMITTED', 'ACCEPTED', 'RETURNED_FOR_CORRECTION', 'DISCREPANCY_FLAGGED', 'ALL'])
+    .optional(),
+  outcome: z
+    .enum(['VERIFIED', 'DISCREPANCY_FOUND', 'INCONCLUSIVE', 'ALL'])
+    .optional(),
+  caseId: z.string().uuid().optional(),
+});
+
+export type ListReviewQueueQuery = z.infer<typeof listReviewQueueQuerySchema>;

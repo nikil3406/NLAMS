@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import type { AcquisitionCaseWithRelations } from '../../../../repositories/acquisition-case.repository';
+import type { CaseVerificationSummary } from '../../../../repositories/field-verification-report.repository';
 import type { AcquisitionCaseStatus } from '../../../../../db/schema/acquisition-cases';
 import { ParcelsSection } from './parcels-section';
 
@@ -72,6 +73,7 @@ export function AcquisitionCaseDetailsClient({
   // Tab Navigation State
   const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'PARCELS'>('OVERVIEW');
   const [parcelCount, setParcelCount] = useState<number>(0);
+  const [verificationSummary, setVerificationSummary] = useState<CaseVerificationSummary | null>(null);
 
   // Edit Modal State
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -119,6 +121,15 @@ export function AcquisitionCaseDetailsClient({
             const parcelsJson = await parcelsRes.json();
             if (parcelsJson.pagination) {
               setParcelCount(parcelsJson.pagination.total);
+            }
+          }
+        } catch {}
+        try {
+          const summaryRes = await fetch(`/api/acquisition-cases/${caseId}/verification-summary`);
+          if (summaryRes.ok) {
+            const summaryJson = await summaryRes.json();
+            if (summaryJson.success && summaryJson.data) {
+              setVerificationSummary(summaryJson.data);
             }
           }
         } catch {}
@@ -801,6 +812,222 @@ export function AcquisitionCaseDetailsClient({
                 {acqCase.description || 'No description provided.'}
               </p>
             </div>
+          </div>
+        </div>
+      </div>
+
+      
+      {/* Case-Level Field Verification Summary Section */}
+      <div
+        style={{
+          background: '#1e293b',
+          border: '1px solid rgba(255,255,255,0.08)',
+          borderRadius: '12px',
+          padding: '1.5rem',
+          marginBottom: '2rem',
+        }}
+        id="case-verification-summary-card"
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+          <div>
+            <h2 style={{ fontSize: '1.125rem', fontWeight: 600, color: '#f1f5f9', margin: '0 0 0.25rem 0' }}>
+              Field Verification Progress Summary
+            </h2>
+            <p style={{ fontSize: '0.8125rem', color: '#94a3b8', margin: 0 }}>
+              Live ground inspection progress and review status derived across all parcels in this case.
+            </p>
+          </div>
+
+          {isLandOfficer && verificationSummary && verificationSummary.reportsAwaitingReview > 0 && (
+            <Link
+              href={`/verification-reviews?caseId=${caseId}`}
+              className="btn-primary"
+              style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem', backgroundColor: '#059669', borderColor: '#10b981' }}
+              id="summary-review-queue-link"
+            >
+              Review Awaiting Reports ({verificationSummary.reportsAwaitingReview}) →
+            </Link>
+          )}
+        </div>
+
+        {/* Outstanding Alerts */}
+        {verificationSummary && verificationSummary.outstandingReviewActions > 0 && (
+          <div
+            style={{
+              background: 'rgba(59, 130, 246, 0.1)',
+              border: '1px solid rgba(59, 130, 246, 0.3)',
+              color: '#93c5fd',
+              padding: '0.6rem 0.85rem',
+              borderRadius: '6px',
+              fontSize: '0.8125rem',
+              marginBottom: '1rem',
+            }}
+            id="summary-outstanding-review-banner"
+          >
+            <strong>Action Required:</strong> {verificationSummary.outstandingReviewActions} submitted report(s) are awaiting Land Officer formal review.
+          </div>
+        )}
+
+        {verificationSummary && verificationSummary.outstandingDiscrepancies > 0 && (
+          <div
+            style={{
+              background: 'rgba(239, 68, 68, 0.1)',
+              border: '1px solid rgba(239, 68, 68, 0.35)',
+              color: '#fca5a5',
+              padding: '0.6rem 0.85rem',
+              borderRadius: '6px',
+              fontSize: '0.8125rem',
+              marginBottom: '1rem',
+            }}
+            id="summary-outstanding-discrepancies-banner"
+          >
+            <strong>⚠️ Unresolved Discrepancies:</strong> {verificationSummary.outstandingDiscrepancies} parcel finding(s) have active discrepancies flagged requiring investigation.
+          </div>
+        )}
+
+        {/* Parcel vs Report Metrics Grid */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+            gap: '0.75rem',
+            marginBottom: '1.25rem',
+          }}
+          id="summary-metrics-grid"
+        >
+          <div style={{ background: 'rgba(0,0,0,0.25)', padding: '0.75rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
+            <span style={{ fontSize: '0.6875rem', color: '#94a3b8', display: 'block', textTransform: 'uppercase', fontWeight: 600 }}>Total Parcels</span>
+            <span style={{ fontSize: '1.25rem', fontWeight: 700, color: '#f1f5f9' }} id="summary-total-parcels">
+              {verificationSummary?.totalParcels ?? parcelCount}
+            </span>
+          </div>
+
+          <div style={{ background: 'rgba(0,0,0,0.25)', padding: '0.75rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
+            <span style={{ fontSize: '0.6875rem', color: '#94a3b8', display: 'block', textTransform: 'uppercase', fontWeight: 600 }}>Parcels Submitted</span>
+            <span style={{ fontSize: '1.25rem', fontWeight: 700, color: '#60a5fa' }} id="summary-parcels-submitted">
+              {verificationSummary?.parcelsWithSubmittedReports ?? 0}
+            </span>
+          </div>
+
+          <div style={{ background: 'rgba(0,0,0,0.25)', padding: '0.75rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
+            <span style={{ fontSize: '0.6875rem', color: '#94a3b8', display: 'block', textTransform: 'uppercase', fontWeight: 600 }}>Awaiting Review</span>
+            <span style={{ fontSize: '1.25rem', fontWeight: 700, color: '#38bdf8' }} id="summary-reports-awaiting">
+              {verificationSummary?.reportsAwaitingReview ?? 0}
+            </span>
+          </div>
+
+          <div style={{ background: 'rgba(0,0,0,0.25)', padding: '0.75rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
+            <span style={{ fontSize: '0.6875rem', color: '#94a3b8', display: 'block', textTransform: 'uppercase', fontWeight: 600 }}>Accepted</span>
+            <span style={{ fontSize: '1.25rem', fontWeight: 700, color: '#34d399' }} id="summary-reports-accepted">
+              {verificationSummary?.acceptedReports ?? 0}
+            </span>
+          </div>
+
+          <div style={{ background: 'rgba(0,0,0,0.25)', padding: '0.75rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
+            <span style={{ fontSize: '0.6875rem', color: '#94a3b8', display: 'block', textTransform: 'uppercase', fontWeight: 600 }}>Returned</span>
+            <span style={{ fontSize: '1.25rem', fontWeight: 700, color: '#fbbf24' }} id="summary-reports-returned">
+              {verificationSummary?.returnedReports ?? 0}
+            </span>
+          </div>
+
+          <div style={{ background: 'rgba(0,0,0,0.25)', padding: '0.75rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
+            <span style={{ fontSize: '0.6875rem', color: '#94a3b8', display: 'block', textTransform: 'uppercase', fontWeight: 600 }}>Discrepancies</span>
+            <span style={{ fontSize: '1.25rem', fontWeight: 700, color: '#f87171' }} id="summary-reports-discrepancy">
+              {verificationSummary?.discrepancyFlaggedReports ?? 0}
+            </span>
+          </div>
+
+          <div style={{ background: 'rgba(0,0,0,0.25)', padding: '0.75rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
+            <span style={{ fontSize: '0.6875rem', color: '#94a3b8', display: 'block', textTransform: 'uppercase', fontWeight: 600 }}>Inconclusive</span>
+            <span style={{ fontSize: '1.25rem', fontWeight: 700, color: '#c084fc' }} id="summary-reports-inconclusive">
+              {verificationSummary?.inconclusiveFindings ?? 0}
+            </span>
+          </div>
+        </div>
+
+        {/* Area Totals with Unit Compatibility Notice */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+            gap: '1rem',
+            background: 'rgba(0,0,0,0.2)',
+            padding: '1rem',
+            borderRadius: '8px',
+            border: '1px solid rgba(255,255,255,0.05)',
+          }}
+          id="summary-area-aggregation"
+        >
+          {/* Recorded Parcel Area Total */}
+          <div>
+            <span style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: '0.2rem' }}>
+              Total Recorded Parcel Area
+            </span>
+            {verificationSummary?.areaTotals?.recordedParcelArea?.isCompatible ? (
+              <div style={{ fontSize: '1.125rem', fontWeight: 700, color: '#f1f5f9' }} id="summary-recorded-area-total">
+                {verificationSummary?.areaTotals?.recordedParcelArea?.total !== null && verificationSummary?.areaTotals?.recordedParcelArea?.total !== undefined
+                  ? `${verificationSummary.areaTotals.recordedParcelArea.total} ${verificationSummary.areaTotals.recordedParcelArea.unit}`
+                  : '0 SQ_M'}
+              </div>
+            ) : (
+              <div>
+                <span
+                  style={{
+                    fontSize: '0.6875rem',
+                    padding: '2px 6px',
+                    borderRadius: '4px',
+                    background: 'rgba(245, 158, 11, 0.15)',
+                    color: '#fbbf24',
+                    border: '1px solid rgba(245, 158, 11, 0.3)',
+                    fontWeight: 600,
+                  }}
+                  id="summary-recorded-area-incompatible"
+                >
+                  Mixed Units (Scalar aggregation omitted)
+                </span>
+                <div style={{ fontSize: '0.75rem', color: '#cbd5e1', marginTop: '0.35rem' }}>
+                  {Object.entries(verificationSummary?.areaTotals?.recordedParcelArea?.breakdownByUnit ?? {}).map(
+                    ([u, val]) => `${val} ${u}`
+                  ).join(', ')}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Proposed Affected Area Total */}
+          <div>
+            <span style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: '0.2rem' }}>
+              Total Proposed Affected Area
+            </span>
+            {verificationSummary?.areaTotals?.proposedAffectedArea?.isCompatible ? (
+              <div style={{ fontSize: '1.125rem', fontWeight: 700, color: '#60a5fa' }} id="summary-proposed-area-total">
+                {verificationSummary?.areaTotals?.proposedAffectedArea?.total !== null && verificationSummary?.areaTotals?.proposedAffectedArea?.total !== undefined
+                  ? `${verificationSummary.areaTotals.proposedAffectedArea.total} ${verificationSummary.areaTotals.proposedAffectedArea.unit}`
+                  : '0 SQ_M'}
+              </div>
+            ) : (
+              <div>
+                <span
+                  style={{
+                    fontSize: '0.6875rem',
+                    padding: '2px 6px',
+                    borderRadius: '4px',
+                    background: 'rgba(245, 158, 11, 0.15)',
+                    color: '#fbbf24',
+                    border: '1px solid rgba(245, 158, 11, 0.3)',
+                    fontWeight: 600,
+                  }}
+                  id="summary-proposed-area-incompatible"
+                >
+                  Mixed Units (Scalar aggregation omitted)
+                </span>
+                <div style={{ fontSize: '0.75rem', color: '#cbd5e1', marginTop: '0.35rem' }}>
+                  {Object.entries(verificationSummary?.areaTotals?.proposedAffectedArea?.breakdownByUnit ?? {}).map(
+                    ([u, val]) => `${val} ${u}`
+                  ).join(', ')}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

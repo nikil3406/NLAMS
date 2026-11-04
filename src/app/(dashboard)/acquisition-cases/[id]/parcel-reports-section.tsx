@@ -261,6 +261,21 @@ export function ParcelReportsSection({
                         {rpt.id.slice(0, 8)}...
                       </span>
 
+                      {/* Revision Badge */}
+                      <span
+                        style={{
+                          fontSize: '0.6875rem',
+                          padding: '0.15rem 0.45rem',
+                          borderRadius: '4px',
+                          fontWeight: 700,
+                          background: 'rgba(56, 189, 248, 0.15)',
+                          color: '#38bdf8',
+                          border: '1px solid rgba(56, 189, 248, 0.3)',
+                        }}
+                      >
+                        Rev {rpt.revisionNumber ?? 1}
+                      </span>
+
                       {/* Status Badge */}
                       <span
                         style={{
@@ -268,12 +283,49 @@ export function ParcelReportsSection({
                           padding: '0.15rem 0.45rem',
                           borderRadius: '4px',
                           fontWeight: 600,
-                          background: isSub ? 'rgba(16, 185, 129, 0.15)' : 'rgba(59, 130, 246, 0.15)',
-                          color: isSub ? '#34d399' : '#60a5fa',
-                          border: `1px solid ${isSub ? 'rgba(16, 185, 129, 0.3)' : 'rgba(59, 130, 246, 0.3)'}`,
+                          background:
+                            rpt.status === 'ACCEPTED'
+                              ? 'rgba(16, 185, 129, 0.15)'
+                              : rpt.status === 'RETURNED_FOR_CORRECTION'
+                              ? 'rgba(245, 158, 11, 0.15)'
+                              : rpt.status === 'DISCREPANCY_FLAGGED'
+                              ? 'rgba(239, 68, 68, 0.15)'
+                              : rpt.status === 'SUBMITTED'
+                              ? 'rgba(59, 130, 246, 0.15)'
+                              : 'rgba(148, 163, 184, 0.15)',
+                          color:
+                            rpt.status === 'ACCEPTED'
+                              ? '#34d399'
+                              : rpt.status === 'RETURNED_FOR_CORRECTION'
+                              ? '#fbbf24'
+                              : rpt.status === 'DISCREPANCY_FLAGGED'
+                              ? '#f87171'
+                              : rpt.status === 'SUBMITTED'
+                              ? '#60a5fa'
+                              : '#cbd5e1',
+                          border: `1px solid ${
+                            rpt.status === 'ACCEPTED'
+                              ? 'rgba(16, 185, 129, 0.3)'
+                              : rpt.status === 'RETURNED_FOR_CORRECTION'
+                              ? 'rgba(245, 158, 11, 0.3)'
+                              : rpt.status === 'DISCREPANCY_FLAGGED'
+                              ? 'rgba(239, 68, 68, 0.3)'
+                              : rpt.status === 'SUBMITTED'
+                              ? 'rgba(59, 130, 246, 0.3)'
+                              : 'rgba(148, 163, 184, 0.3)'
+                          }`,
                         }}
+                        id={`report-status-badge-${rpt.id}`}
                       >
-                        {isSub ? '🔒 SUBMITTED' : '✎ DRAFT'}
+                        {rpt.status === 'SUBMITTED'
+                          ? '🔒 SUBMITTED'
+                          : rpt.status === 'ACCEPTED'
+                          ? '✓ ACCEPTED'
+                          : rpt.status === 'RETURNED_FOR_CORRECTION'
+                          ? '↩ RETURNED FOR CORRECTION'
+                          : rpt.status === 'DISCREPANCY_FLAGGED'
+                          ? '⚠️ DISCREPANCY FLAGGED'
+                          : '✎ DRAFT'}
                       </span>
 
                       {/* Outcome Badge */}
@@ -316,7 +368,7 @@ export function ParcelReportsSection({
                     style={{ fontSize: '0.75rem', padding: '0.25rem 0.65rem' }}
                     id={`inspect-report-${rpt.id}-btn`}
                   >
-                    {!isSub && isAuthor && canCreateReport ? 'Edit Draft' : 'Inspect Details'}
+                    {rpt.status === 'DRAFT' && isAuthor && canCreateReport ? 'Edit Draft' : 'Inspect / Review'}
                   </button>
                 </div>
 

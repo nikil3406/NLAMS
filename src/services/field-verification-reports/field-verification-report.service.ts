@@ -1,6 +1,7 @@
 import {
   fieldVerificationReportRepository,
   type FieldVerificationReportWithDetails,
+  type CaseVerificationSummary,
 } from '../../repositories/field-verification-report.repository';
 import { parcelRepository } from '../../repositories/parcel.repository';
 import { acquisitionCaseRepository } from '../../repositories/acquisition-case.repository';
@@ -18,6 +19,8 @@ import type {
   SubmitFieldVerificationReportInput,
   EvidenceItemInput,
   ListFieldVerificationReportsQuery,
+  ReviewFieldVerificationReportInput,
+  ListReviewQueueQuery,
 } from '../../validators/field-verification-reports';
 import type { FieldVerificationEvidence } from '../../../db/schema/field-verification-evidence';
 
@@ -341,9 +344,9 @@ export class FieldVerificationReportService {
    *   - Valid outcome (VERIFIED, DISCREPANCY_FOUND, INCONCLUSIVE)
    *   - Non-empty field observations
    *   - Positive measured area and valid unit if measured area is provided
-   *   - At least one linked evidence item (exception mechanism not currently implemented)
+   *   - At least one linked evidence item
    * - Atomically transitions report to SUBMITTED with server-derived verifiedBy and submittedAt.
-   * - Case remains in AWAITING_FIELD_VERIFICATION status (report submission is not case approval).
+   * - Case remains in AWAITING_FIELD_VERIFICATION status.
    */
   async submitReport(
     caseId: string,
@@ -437,6 +440,215 @@ export class FieldVerificationReportService {
     }
 
     return submitted;
+  }
+
+  /**
+   * Reviews a submitted field verification report and records an authorized Land Officer workflow decision.
+   *
+   * Permitted decisions:
+   *   - ACCEPTED
+   *   - RETURNED_FOR_CORRECTION (mandatory remarks required)
+   *   - DISCREPANCY_FLAGGED (mandatory remarks/reason required)
+   *
+   * Authorization rules:
+   *   - Caller must hold ACQUISITION_CASE_VIEW permission.
+   *   - Caller must hold the LAND_OFFICER role.
+   *   - Case must be within caller's administrative scope.
+   *   - Separation of duties: Reviewer CANNOT be the report author or the verifier who submitted it.
+   *     SUPER_ADMIN does NOT bypass this separation of duties rule.
+   *   - Report must be in SUBMITTED status (drafts cannot be reviewed; already reviewed reports reject duplicates).
+   *   - Concurrency protection: Serialized conditional update in a transaction.
+   *   - Preserves auditable history in field_verification_report_reviews table.
+   */
+  async reviewReport(
+    caseId: string,
+    caseParcelId: string,
+    reportId: string,
+    input: ReviewFieldVerificationReportInput,
+    userId: string
+  ): Promise<FieldVerificationReportWithDetails> {
+    await this.assertCaseViewAccess(caseId, userId);
+    await this.assertCaseParcelBelongsToCase(caseParcelId, caseId);
+
+    // Role check: Only LAND_OFFICER may review field verification reports
+    const callerRoles = await permissionService.getUserRoles(userId);
+    if (!callerRoles.includes('LAND_OFFICER')) {
+      throw new ForbiddenError(
+        'Forbidden: Only an authorized Land Officer may review field verification reports'
+      );
+    }
+
+    const report = await this.assertReportBelongsToCaseParcel(reportId, caseParcelId);
+
+    // Separation of duties: Reviewer cannot be the report author or verifier
+    // SUPER_ADMIN does NOT bypass this rule.
+    if (report.createdBy === userId || (report.verifiedBy && report.verifiedBy === userId)) {
+      throw new ForbiddenError(
+        'Forbidden: The officer who authored or submitted this field verification report cannot review it (separation of duties)'
+      );
+    }
+
+    // Verify report eligibility
+    if (report.status === 'DRAFT') {
+      throw new BadRequestError(
+        'Cannot review report: report is still in DRAFT status and has not been submitted for review'
+      );
+    }
+
+    if (report.status !== 'SUBMITTED') {
+      throw new ConflictError(
+        `Cannot review report: report has already been reviewed (current status: '${report.status}')`
+      );
+    }
+
+    // Validate remarks requirements
+    const remarks = input.remarks?.trim() ?? null;
+    if (input.decision === 'RETURNED_FOR_CORRECTION' && (!remarks || remarks.length < 5)) {
+      throw new BadRequestError(
+        'Remarks explaining correction requirements are mandatory when returning a report for correction (minimum 5 characters)'
+      );
+    }
+    if (input.decision === 'DISCREPANCY_FLAGGED' && (!remarks || remarks.length < 5)) {
+      throw new BadRequestError(
+        'A reason or remarks explaining the discrepancy are mandatory when flagging a report (minimum 5 characters)'
+      );
+    }
+
+    // Perform atomic review transition
+    const reviewed = await fieldVerificationReportRepository.reviewReport(
+      reportId,
+      userId,
+      input.decision,
+      remarks
+    );
+
+    if (!reviewed) {
+      throw new ConflictError(
+        'Concurrent review detected: this report has already been transitioned by another reviewer'
+      );
+    }
+
+    return reviewed;
+  }
+
+  /**
+   * Initiates a correction revision for a report that was RETURNED_FOR_CORRECTION.
+   *
+   * Enforces:
+   * - Caller must be an authorized FIELD_OFFICER with case management access.
+   * - Caller must be the original author of the returned report.
+   * - Original report must be in RETURNED_FOR_CORRECTION status.
+   * - Preserves the returned report, its review decision, and audit history.
+   * - Creates a new revision draft (incremented revisionNumber, linked via previousReportId)
+   *   with copied observations, measurements, and evidence.
+   */
+  async createCorrectionDraft(
+    caseId: string,
+    caseParcelId: string,
+    reportId: string,
+    userId: string
+  ): Promise<FieldVerificationReportWithDetails> {
+    await this.assertFieldOfficerManagementAccess(caseId, userId);
+    await this.assertCaseParcelBelongsToCase(caseParcelId, caseId);
+    const existing = await this.assertReportBelongsToCaseParcel(reportId, caseParcelId);
+
+    // Enforce author-only correction
+    if (existing.createdBy !== userId) {
+      throw new ForbiddenError(
+        'Forbidden: only the author who created the report may initiate corrections for resubmission'
+      );
+    }
+
+    // Must be in RETURNED_FOR_CORRECTION status
+    if (existing.status !== 'RETURNED_FOR_CORRECTION') {
+      throw new BadRequestError(
+        `Cannot initiate correction: report is in '${existing.status}' status. Corrections can only be initiated on reports in 'RETURNED_FOR_CORRECTION' status.`
+      );
+    }
+
+    const revisionDraft = await fieldVerificationReportRepository.createCorrectionDraft(
+      reportId,
+      userId
+    );
+
+    return revisionDraft;
+  }
+
+  /**
+   * Lists submitted reports for the Land Officer review queue.
+   * Strictly excludes DRAFT reports.
+   * Scoped to the user's authorized administrative units.
+   */
+  async listReviewQueue(
+    query: ListReviewQueueQuery,
+    userId: string
+  ): Promise<PaginatedReportsResult> {
+    await permissionService.requirePermission(userId, 'ACQUISITION_CASE_VIEW');
+
+    const isSuper = await permissionService.isSuperAdmin(userId);
+    const callerRoles = await permissionService.getUserRoles(userId);
+
+    if (!isSuper && !callerRoles.includes('LAND_OFFICER')) {
+      throw new ForbiddenError(
+        'Forbidden: Only an authorized Land Officer or Super Admin may access the review queue'
+      );
+    }
+
+    let allowedUnitIds: string[] | undefined;
+
+    if (!isSuper) {
+      const assignedUnits = await scopeService.getUserAssignedUnits(userId);
+      if (assignedUnits.length === 0) {
+        return {
+          data: [],
+          pagination: {
+            total: 0,
+            page: query.page,
+            limit: query.limit,
+            totalPages: 1,
+          },
+        };
+      }
+
+      const unitIdSet = new Set<string>();
+      for (const unit of assignedUnits) {
+        const descendants = await scopeService.getDescendantUnitIds(unit.id);
+        for (const id of descendants) {
+          unitIdSet.add(id);
+        }
+      }
+      allowedUnitIds = Array.from(unitIdSet);
+    }
+
+    const { data, total } = await fieldVerificationReportRepository.listReviewQueue({
+      page: query.page,
+      limit: query.limit,
+      reviewStatus: query.reviewStatus,
+      outcome: query.outcome,
+      caseId: query.caseId,
+      allowedUnitIds,
+    });
+
+    return {
+      data,
+      pagination: {
+        total,
+        page: query.page,
+        limit: query.limit,
+        totalPages: Math.ceil(total / query.limit) || 1,
+      },
+    };
+  }
+
+  /**
+   * Retrieves the case-level verification progress summary across all parcels and reports.
+   */
+  async getCaseVerificationSummary(
+    caseId: string,
+    userId: string
+  ): Promise<CaseVerificationSummary> {
+    await this.assertCaseViewAccess(caseId, userId);
+    return fieldVerificationReportRepository.getCaseVerificationSummary(caseId);
   }
 }
 

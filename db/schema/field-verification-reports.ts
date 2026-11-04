@@ -4,6 +4,7 @@ import {
   varchar,
   text,
   numeric,
+  integer,
   timestamp,
   index,
   check,
@@ -11,6 +12,8 @@ import {
 import { relations, sql } from 'drizzle-orm';
 import { acquisitionCaseParcels } from './acquisition-case-parcels';
 import { users } from './users';
+import { fieldVerificationEvidence } from './field-verification-evidence';
+import { fieldVerificationReportReviews } from './field-verification-report-reviews';
 
 /**
  * Report outcome decisions produced during field verification inspection.
@@ -25,11 +28,14 @@ export type FieldVerificationReportOutcome =
   (typeof FIELD_VERIFICATION_REPORT_OUTCOMES)[number];
 
 /**
- * Lifecycle statuses for a field verification report.
+ * Lifecycle and review statuses for a field verification report.
  */
 export const FIELD_VERIFICATION_REPORT_STATUSES = [
   'DRAFT',
   'SUBMITTED',
+  'ACCEPTED',
+  'RETURNED_FOR_CORRECTION',
+  'DISCREPANCY_FLAGGED',
 ] as const;
 
 export type FieldVerificationReportStatus =
@@ -44,6 +50,8 @@ export type FieldVerificationReportStatus =
  *   without overwriting previous history.
  * - Stores field-measured affected area separately from official recorded area and proposed affected area.
  * - Preserves verifier identity, inspection date, observations, and measurement notes.
+ * - Records Land Officer review workflow decisions (ACCEPTED, RETURNED_FOR_CORRECTION, DISCREPANCY_FLAGGED).
+ * - Tracks revisions and resubmissions via revisionNumber and previousReportId.
  */
 export const fieldVerificationReports = pgTable(
   'field_verification_reports',
@@ -63,6 +71,14 @@ export const fieldVerificationReports = pgTable(
     measurementNotes: text('measurement_notes'),
     status: varchar('status', { length: 50 }).default('DRAFT').notNull(),
     submittedAt: timestamp('submitted_at', { withTimezone: true }),
+    reviewedBy: uuid('reviewed_by')
+      .references(() => users.id, { onDelete: 'restrict' }),
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+    reviewDecision: varchar('review_decision', { length: 50 }),
+    reviewRemarks: text('review_remarks'),
+    previousReportId: uuid('previous_report_id')
+      .references((): any => fieldVerificationReports.id, { onDelete: 'set null' }),
+    revisionNumber: integer('revision_number').default(1).notNull(),
     createdBy: uuid('created_by')
       .notNull()
       .references(() => users.id, { onDelete: 'restrict' }),
@@ -75,6 +91,8 @@ export const fieldVerificationReports = pgTable(
     index('field_verif_reports_status_idx').on(table.status),
     index('field_verif_reports_outcome_idx').on(table.outcome),
     index('field_verif_reports_created_at_idx').on(table.createdAt),
+    index('field_verif_reports_reviewed_by_idx').on(table.reviewedBy),
+    index('field_verif_reports_prev_report_id_idx').on(table.previousReportId),
     check(
       'field_verif_reports_measured_area_check',
       sql`${table.measuredArea} IS NULL OR ${table.measuredArea} > 0`
@@ -89,12 +107,10 @@ export const fieldVerificationReports = pgTable(
     ),
     check(
       'field_verif_reports_status_check',
-      sql`${table.status} IN ('DRAFT', 'SUBMITTED')`
+      sql`${table.status} IN ('DRAFT', 'SUBMITTED', 'ACCEPTED', 'RETURNED_FOR_CORRECTION', 'DISCREPANCY_FLAGGED')`
     ),
   ]
 );
-
-import { fieldVerificationEvidence } from './field-verification-evidence';
 
 export const fieldVerificationReportsRelations = relations(
   fieldVerificationReports,
@@ -113,7 +129,18 @@ export const fieldVerificationReportsRelations = relations(
       references: [users.id],
       relationName: 'reportCreator',
     }),
+    reviewer: one(users, {
+      fields: [fieldVerificationReports.reviewedBy],
+      references: [users.id],
+      relationName: 'reportReviewer',
+    }),
+    previousReport: one(fieldVerificationReports, {
+      fields: [fieldVerificationReports.previousReportId],
+      references: [fieldVerificationReports.id],
+      relationName: 'reportRevisions',
+    }),
     evidence: many(fieldVerificationEvidence),
+    reviews: many(fieldVerificationReportReviews),
   })
 );
 
