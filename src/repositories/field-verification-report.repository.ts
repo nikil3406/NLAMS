@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, sql, type SQL } from 'drizzle-orm';
 import { db } from '../../db';
 import {
   fieldVerificationReports,
@@ -12,12 +12,9 @@ import {
   fieldVerificationReportReviews,
   type FieldVerificationReportReview,
 } from '../../db/schema/field-verification-report-reviews';
-import { acquisitionCaseParcels } from '../../db/schema/acquisition-case-parcels';
-import { landParcels } from '../../db/schema/land-parcels';
-import { acquisitionCases } from '../../db/schema/acquisition-cases';
-import { projects } from '../../db/schema/projects';
 import type { TransactionClient } from './parcel.repository';
 import { ConflictError } from '../types/errors';
+import { discrepancyRepository, type CaseDiscrepancyCounts } from './discrepancy.repository';
 
 export interface FieldVerificationReportWithDetails extends FieldVerificationReport {
   caseParcel: {
@@ -81,6 +78,7 @@ export interface CaseVerificationSummary {
   inconclusiveFindings: number;
   outstandingReviewActions: number;
   outstandingDiscrepancies: number;
+  discrepanciesSummary?: CaseDiscrepancyCounts;
   areaTotals: {
     recordedParcelArea: {
       total: number | null;
@@ -386,15 +384,43 @@ export class FieldVerificationReportRepository {
         return null;
       }
 
-      await tx.insert(fieldVerificationReportReviews).values({
-        reportId,
-        reviewerId,
-        decision,
-        fromStatus: 'SUBMITTED',
-        toStatus: decision,
-        remarks: remarks ?? null,
-        createdAt: now,
-      });
+      const [reviewEntry] = await tx
+        .insert(fieldVerificationReportReviews)
+        .values({
+          reportId,
+          reviewerId,
+          decision,
+          fromStatus: 'SUBMITTED',
+          toStatus: decision,
+          remarks: remarks ?? null,
+          createdAt: now,
+        })
+        .returning();
+
+      // If decision is DISCREPANCY_FLAGGED, create or link formal discrepancy record transactionally
+      if (decision === 'DISCREPANCY_FLAGGED') {
+        const [acpRow] = await tx.execute(sql`
+          SELECT acp.case_id AS "caseId", acp.id AS "caseParcelId"
+          FROM field_verification_reports fvr
+          INNER JOIN acquisition_case_parcels acp ON acp.id = fvr.case_parcel_id
+          WHERE fvr.id = ${reportId}::uuid
+          LIMIT 1
+        `);
+        if (acpRow) {
+          await discrepancyRepository.findOrCreateDiscrepancyForReport(
+            {
+              caseId: String(acpRow.caseId),
+              caseParcelId: String(acpRow.caseParcelId),
+              reportId,
+              reviewId: reviewEntry?.id ?? null,
+              category: 'OTHER',
+              description: remarks ?? 'Discrepancy flagged during field verification review',
+              createdBy: reviewerId,
+            },
+            tx
+          );
+        }
+      }
 
       const fullReport = await this.findReportById(reportId, tx);
       return fullReport;
@@ -776,7 +802,7 @@ export class FieldVerificationReportRepository {
     const offset = (options.page - 1) * options.limit;
 
     // Build filter expressions
-    const whereConditions: any[] = [sql`fvr.status != 'DRAFT'`];
+    const whereConditions: SQL[] = [sql`fvr.status != 'DRAFT'`];
 
     if (options.reviewStatus && options.reviewStatus !== 'ALL') {
       whereConditions.push(sql`fvr.status = ${options.reviewStatus}`);
@@ -1084,6 +1110,11 @@ export class FieldVerificationReportRepository {
           p.latestReportStatus !== 'RETURNED_FOR_CORRECTION'
       ).length;
 
+    const discrepancyCounts = await discrepancyRepository.getCaseDiscrepancyCounts(
+      caseId,
+      txClient
+    );
+
     return {
       caseId,
       totalParcels,
@@ -1095,6 +1126,7 @@ export class FieldVerificationReportRepository {
       inconclusiveFindings,
       outstandingReviewActions,
       outstandingDiscrepancies,
+      discrepanciesSummary: discrepancyCounts,
       areaTotals: {
         recordedParcelArea: {
           total: recordedTotal,

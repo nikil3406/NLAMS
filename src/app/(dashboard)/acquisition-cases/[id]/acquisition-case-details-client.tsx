@@ -6,6 +6,8 @@ import type { AcquisitionCaseWithRelations } from '../../../../repositories/acqu
 import type { CaseVerificationSummary } from '../../../../repositories/field-verification-report.repository';
 import type { AcquisitionCaseStatus } from '../../../../../db/schema/acquisition-cases';
 import { ParcelsSection } from './parcels-section';
+import { DiscrepanciesSection } from './discrepancies-section';
+import type { CaseDiscrepancyCounts } from '../../../../repositories/discrepancy.repository';
 
 interface AcquisitionCaseDetailsClientProps {
   caseId: string;
@@ -71,7 +73,8 @@ export function AcquisitionCaseDetailsClient({
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   // Tab Navigation State
-  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'PARCELS'>('OVERVIEW');
+  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'PARCELS' | 'DISCREPANCIES'>('OVERVIEW');
+  const [discrepancyCounts, setDiscrepancyCounts] = useState<CaseDiscrepancyCounts | null>(null);
   const [parcelCount, setParcelCount] = useState<number>(0);
   const [verificationSummary, setVerificationSummary] = useState<CaseVerificationSummary | null>(null);
 
@@ -130,6 +133,9 @@ export function AcquisitionCaseDetailsClient({
             const summaryJson = await summaryRes.json();
             if (summaryJson.success && summaryJson.data) {
               setVerificationSummary(summaryJson.data);
+            if (summaryJson.data.discrepanciesSummary) {
+              setDiscrepancyCounts(summaryJson.data.discrepanciesSummary);
+            }
             }
           }
         } catch {}
@@ -713,6 +719,40 @@ export function AcquisitionCaseDetailsClient({
             {parcelCount}
           </span>
         </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('DISCREPANCIES')}
+          style={{
+            padding: '0.625rem 1.25rem',
+            background: 'transparent',
+            border: 'none',
+            borderBottom: activeTab === 'DISCREPANCIES' ? '2px solid #3b82f6' : '2px solid transparent',
+            color: activeTab === 'DISCREPANCIES' ? '#60a5fa' : '#94a3b8',
+            fontWeight: 600,
+            fontSize: '0.875rem',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+          }}
+          id="tab-btn-discrepancies"
+        >
+          <span>Discrepancies</span>
+          <span
+            style={{
+              background: activeTab === 'DISCREPANCIES' ? 'rgba(59, 130, 246, 0.25)' : 'rgba(255, 255, 255, 0.08)',
+              color: (discrepancyCounts?.openDiscrepancies ?? 0) > 0 ? '#fca5a5' : activeTab === 'DISCREPANCIES' ? '#93c5fd' : '#cbd5e1',
+              borderRadius: '9999px',
+              padding: '0.1rem 0.5rem',
+              fontSize: '0.6875rem',
+              fontWeight: 700,
+            }}
+            id="tab-discrepancies-count"
+          >
+            {discrepancyCounts?.totalDiscrepancies ?? verificationSummary?.discrepanciesSummary?.totalDiscrepancies ?? 0}
+          </span>
+        </button>
       </div>
 
       {activeTab === 'OVERVIEW' && (
@@ -1158,6 +1198,16 @@ export function AcquisitionCaseDetailsClient({
             district: acqCase.project.administrativeUnit?.name,
           }}
           onCountChange={(cnt) => setParcelCount(cnt)}
+        />
+      )}
+
+      {activeTab === 'DISCREPANCIES' && (
+        <DiscrepanciesSection
+          caseId={caseId}
+          currentUserId={currentUserId}
+          userRoles={userRoles}
+          isSuperAdmin={isSuperAdmin}
+          onCountChange={(cnts) => setDiscrepancyCounts(cnts)}
         />
       )}
 

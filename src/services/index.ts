@@ -7,4 +7,5 @@ export * from './projects';
 export * from './acquisition-cases';
 export * from './parcels';
 export * from './field-verification-reports';
+export * from './discrepancies';
 

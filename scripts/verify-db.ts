@@ -102,6 +102,9 @@ async function verify() {
     'field_verification_reports',
     'field_verification_evidence',
     'field_verification_report_reviews',
+    'parcel_discrepancies',
+    'discrepancy_investigations',
+    'discrepancy_resolution_history',
   ];
 
   console.log('\n  Tables:');

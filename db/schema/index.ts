@@ -16,3 +16,6 @@ export * from './acquisition-case-parcels';
 export * from './field-verification-reports';
 export * from './field-verification-evidence';
 export * from './field-verification-report-reviews';
+export * from './parcel-discrepancies';
+export * from './discrepancy-investigations';
+export * from './discrepancy-resolution-history';
