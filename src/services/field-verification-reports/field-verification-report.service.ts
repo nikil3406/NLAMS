@@ -470,11 +470,12 @@ export class FieldVerificationReportService {
     await this.assertCaseViewAccess(caseId, userId);
     await this.assertCaseParcelBelongsToCase(caseParcelId, caseId);
 
-    // Role check: Only LAND_OFFICER may review field verification reports
+    // Role check: Only LAND_OFFICER or SUPER_ADMIN may review field verification reports
+    const isSuper = await permissionService.isSuperAdmin(userId);
     const callerRoles = await permissionService.getUserRoles(userId);
-    if (!callerRoles.includes('LAND_OFFICER')) {
+    if (!isSuper && !callerRoles.includes('LAND_OFFICER')) {
       throw new ForbiddenError(
-        'Forbidden: Only an authorized Land Officer may review field verification reports'
+        'Forbidden: Only an authorized Land Officer or Super Admin may review field verification reports'
       );
     }
 

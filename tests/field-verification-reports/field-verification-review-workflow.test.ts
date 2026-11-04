@@ -580,7 +580,7 @@ describe('NLAMS — Step 5B: Land Officer Review Workflow and Case Summary', () 
       params: Promise.resolve({ id: awaitingVerifCaseId, caseParcelId: caseParcel1Id, reportId: rptId }),
     });
     assert.equal(res2.status, 409);
-    const json = await res.json();
+    const json = await res2.json();
     assert.match(json.error, /already been reviewed/i);
   });
 

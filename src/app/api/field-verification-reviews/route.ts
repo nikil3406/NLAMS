@@ -48,7 +48,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       { status: 200 }
     );
   } catch (error) {
-    console.error('Error in GET /api/field-verification-reviews:', error);
     return handleApiError(error);
   }
 }
