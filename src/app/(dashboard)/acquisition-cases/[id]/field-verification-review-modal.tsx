@@ -10,6 +10,7 @@ interface FieldVerificationReviewModalProps {
   currentUserId: string;
   userRoles: string[];
   isSuperAdmin: boolean;
+  isVerifiedLandOfficer?: boolean;
   onClose: () => void;
   onDecisionSuccess: (updatedReport: FieldVerificationReportWithDetails) => void;
   onCorrectionInitiated?: (newDraft: FieldVerificationReportWithDetails) => void;
@@ -22,11 +23,12 @@ export function FieldVerificationReviewModal({
   currentUserId,
   userRoles,
   isSuperAdmin,
+  isVerifiedLandOfficer = true,
   onClose,
   onDecisionSuccess,
   onCorrectionInitiated,
 }: FieldVerificationReviewModalProps) {
-  const isLandOfficer = userRoles.includes('LAND_OFFICER');
+  const isLandOfficer = isSuperAdmin || userRoles.includes('LAND_OFFICER');
   const isFieldOfficer = userRoles.includes('FIELD_OFFICER');
 
   // Separation of duties: Reviewer cannot be the author or submitter
@@ -34,7 +36,7 @@ export function FieldVerificationReviewModal({
   const isAuthor =
     report.createdBy === currentUserId ||
     (report.verifiedBy !== null && report.verifiedBy === currentUserId);
-  const canReview = isLandOfficer && !isAuthor && report.status === 'SUBMITTED';
+  const canReview = isLandOfficer && isVerifiedLandOfficer && !isAuthor && report.status === 'SUBMITTED';
 
   // State for Review Decision Form
   const [decision, setDecision] = useState<

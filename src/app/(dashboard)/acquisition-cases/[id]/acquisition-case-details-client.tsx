@@ -7,6 +7,7 @@ import type { CaseVerificationSummary } from '../../../../repositories/field-ver
 import type { AcquisitionCaseStatus } from '../../../../../db/schema/acquisition-cases';
 import { ParcelsSection } from './parcels-section';
 import { DiscrepanciesSection } from './discrepancies-section';
+import { CaseVerificationReviewsSection } from './case-verification-reviews-section';
 import type { CaseDiscrepancyCounts } from '../../../../repositories/discrepancy.repository';
 
 interface AcquisitionCaseDetailsClientProps {
@@ -15,6 +16,7 @@ interface AcquisitionCaseDetailsClientProps {
   userPermissions: string[];
   userRoles: string[];
   isSuperAdmin: boolean;
+  isVerifiedLandOfficer?: boolean;
 }
 
 const STATUS_BADGE_STYLES: Record<
@@ -59,6 +61,7 @@ export function AcquisitionCaseDetailsClient({
   userPermissions,
   userRoles,
   isSuperAdmin,
+  isVerifiedLandOfficer = true,
 }: AcquisitionCaseDetailsClientProps) {
   const isLandOfficer = isSuperAdmin || userRoles.includes('LAND_OFFICER');
   const canUpdate = (isSuperAdmin || userPermissions.includes('ACQUISITION_CASE_UPDATE')) && isLandOfficer;
@@ -722,6 +725,42 @@ export function AcquisitionCaseDetailsClient({
 
         <button
           type="button"
+          onClick={() => setActiveTab('VERIFICATION')}
+          style={{
+            padding: '0.625rem 1.25rem',
+            background: 'transparent',
+            border: 'none',
+            borderBottom: activeTab === 'VERIFICATION' ? '2px solid #3b82f6' : '2px solid transparent',
+            color: activeTab === 'VERIFICATION' ? '#60a5fa' : '#94a3b8',
+            fontWeight: 600,
+            fontSize: '0.875rem',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+          }}
+          id="tab-btn-verification"
+        >
+          <span>Report Verification</span>
+          {verificationSummary && verificationSummary.reportsAwaitingReview > 0 && (
+            <span
+              style={{
+                background: activeTab === 'VERIFICATION' ? 'rgba(59, 130, 246, 0.25)' : 'rgba(255, 255, 255, 0.08)',
+                color: activeTab === 'VERIFICATION' ? '#93c5fd' : '#cbd5e1',
+                borderRadius: '9999px',
+                padding: '0.1rem 0.5rem',
+                fontSize: '0.6875rem',
+                fontWeight: 700,
+              }}
+              id="tab-verification-count"
+            >
+              {verificationSummary.reportsAwaitingReview}
+            </span>
+          )}
+        </button>
+
+        <button
+          type="button"
           onClick={() => setActiveTab('DISCREPANCIES')}
           style={{
             padding: '0.625rem 1.25rem',
@@ -939,6 +978,13 @@ export function AcquisitionCaseDetailsClient({
             <span style={{ fontSize: '0.6875rem', color: '#94a3b8', display: 'block', textTransform: 'uppercase', fontWeight: 600 }}>Total Parcels</span>
             <span style={{ fontSize: '1.25rem', fontWeight: 700, color: '#f1f5f9' }} id="summary-total-parcels">
               {verificationSummary?.totalParcels ?? parcelCount}
+            </span>
+          </div>
+
+          <div style={{ background: 'rgba(0,0,0,0.25)', padding: '0.75rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
+            <span style={{ fontSize: '0.6875rem', color: '#94a3b8', display: 'block', textTransform: 'uppercase', fontWeight: 600 }}>Awaiting Submission</span>
+            <span style={{ fontSize: '1.25rem', fontWeight: 700, color: '#94a3b8' }} id="summary-parcels-awaiting-sub">
+              {verificationSummary?.parcelsAwaitingSubmission ?? ((verificationSummary?.totalParcels ?? parcelCount) - (verificationSummary?.parcelsWithSubmittedReports ?? 0))}
             </span>
           </div>
 
@@ -1197,6 +1243,7 @@ export function AcquisitionCaseDetailsClient({
             state: 'Karnataka',
             district: acqCase.project.administrativeUnit?.name,
           }}
+          isVerifiedLandOfficer={isVerifiedLandOfficer}
           onCountChange={(cnt) => setParcelCount(cnt)}
         />
       )}
@@ -1208,6 +1255,22 @@ export function AcquisitionCaseDetailsClient({
           userRoles={userRoles}
           isSuperAdmin={isSuperAdmin}
           onCountChange={(cnts) => setDiscrepancyCounts(cnts)}
+        />
+      )}
+
+      {activeTab === 'VERIFICATION' && (
+        <CaseVerificationReviewsSection
+          caseId={caseId}
+          caseStatus={acqCase.status}
+          currentUserId={currentUserId}
+          userRoles={userRoles}
+          isSuperAdmin={isSuperAdmin}
+          isVerifiedLandOfficer={isVerifiedLandOfficer}
+          verificationSummary={verificationSummary}
+          onReviewDecisionRecorded={() => {
+            fetchVerificationSummary();
+            fetchParcelsCount();
+          }}
         />
       )}
 

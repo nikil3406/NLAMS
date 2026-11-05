@@ -153,9 +153,9 @@ export function FieldReportModal({
     }
   }, [fetchReport, initialReport, reportId]);
 
-  const isSubmitted = report?.status === 'SUBMITTED';
+  const isDraft = report ? report.status === 'DRAFT' : true;
   const isAuthor = report ? report.createdBy === currentUserId : true;
-  const canEdit = !isSubmitted && isAuthor && isFieldOfficer && isAwaitingVerification;
+  const canEdit = isDraft && isAuthor && isFieldOfficer && isAwaitingVerification;
 
   // Handle Close with Unsaved Changes check
   const handleClose = () => {

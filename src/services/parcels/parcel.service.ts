@@ -317,6 +317,21 @@ export class ParcelService {
       );
     }
 
+    // Submission and acceptance locking:
+    // Once submitted, parcel details cannot be modified by Field Officer.
+    // Once accepted, the parcel is permanently locked. No SUPER_ADMIN override.
+    if (existing.isAccepted) {
+      throw new ConflictError(
+        'Cannot modify parcel details: field verification for this parcel has been accepted and is permanently locked'
+      );
+    }
+
+    if (existing.isLocked) {
+      throw new ConflictError(
+        'Cannot modify parcel details: a field verification report has already been submitted for this parcel'
+      );
+    }
+
     const effectiveProposedArea =
       input.proposedAffectedArea !== undefined
         ? input.proposedAffectedArea

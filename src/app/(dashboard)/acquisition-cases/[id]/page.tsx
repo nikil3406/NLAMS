@@ -24,6 +24,12 @@ export default async function AcquisitionCaseDetailsPage({ params }: PageProps) 
   const userPermissions = authContext?.permissions ?? [];
   const userRoles = authContext?.roles ?? [];
   const isSuperAdmin = authContext?.isSuperAdmin ?? false;
+  const userStatus = authContext?.user?.status ?? 'INACTIVE';
+  const hasActiveAssignment = isSuperAdmin || (authContext?.assignments && authContext.assignments.length > 0);
+  const isVerifiedLandOfficer =
+    userStatus === 'ACTIVE' &&
+    (isSuperAdmin || userRoles.includes('LAND_OFFICER')) &&
+    Boolean(hasActiveAssignment);
 
   return (
     <AcquisitionCaseDetailsClient
@@ -32,6 +38,7 @@ export default async function AcquisitionCaseDetailsPage({ params }: PageProps) 
       userPermissions={userPermissions}
       userRoles={userRoles}
       isSuperAdmin={isSuperAdmin}
+      isVerifiedLandOfficer={isVerifiedLandOfficer}
     />
   );
 }

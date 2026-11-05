@@ -12,6 +12,7 @@ interface ParcelsSectionProps {
   currentUserId?: string;
   userRoles: string[];
   isSuperAdmin: boolean;
+  isVerifiedLandOfficer?: boolean;
   projectLocality?: {
     state?: string;
     district?: string;
@@ -25,6 +26,7 @@ export function ParcelsSection({
   currentUserId,
   userRoles,
   isSuperAdmin,
+  isVerifiedLandOfficer = true,
   projectLocality,
   onCountChange,
 }: ParcelsSectionProps) {
@@ -353,6 +355,8 @@ export function ParcelsSection({
               <tbody>
                 {filteredParcels.map((item, idx) => {
                   const { parcel } = item;
+                  const isParcelLocked = Boolean(item.isLocked || item.isAccepted);
+                  const canEditParcel = canAddOrEdit && !isParcelLocked;
                   return (
                     <tr
                       key={item.id}
@@ -419,19 +423,35 @@ export function ParcelsSection({
                       </td>
 
                       <td style={{ padding: '0.875rem 1rem', verticalAlign: 'middle' }}>
-                        <span
-                          style={{
-                            background: 'rgba(148, 163, 184, 0.12)',
-                            color: '#cbd5e1',
-                            border: '1px solid rgba(148, 163, 184, 0.25)',
-                            padding: '0.2rem 0.5rem',
-                            borderRadius: '4px',
-                            fontSize: '0.6875rem',
-                            fontWeight: 500,
-                          }}
-                        >
-                          Demarcated
-                        </span>
+                        {(() => {
+                          const statusBadge = item.isAccepted
+                            ? { bg: 'rgba(16, 185, 129, 0.15)', color: '#34d399', border: 'rgba(16, 185, 129, 0.3)', label: '✓ Verified & Accepted' }
+                            : item.latestReportStatus === 'SUBMITTED'
+                            ? { bg: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', border: 'rgba(59, 130, 246, 0.3)', label: '🔒 Awaiting Review' }
+                            : item.latestReportStatus === 'RETURNED_FOR_CORRECTION'
+                            ? { bg: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', border: 'rgba(245, 158, 11, 0.3)', label: '↩ Returned for Correction' }
+                            : item.latestReportStatus === 'DISCREPANCY_FLAGGED'
+                            ? { bg: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: 'rgba(239, 68, 68, 0.3)', label: '⚠️ Discrepancy Flagged' }
+                            : item.latestReportStatus === 'DRAFT'
+                            ? { bg: 'rgba(148, 163, 184, 0.15)', color: '#94a3b8', border: 'rgba(148, 163, 184, 0.3)', label: '✎ Draft' }
+                            : { bg: 'rgba(148, 163, 184, 0.12)', color: '#cbd5e1', border: 'rgba(148, 163, 184, 0.25)', label: 'Pending Inspection' };
+                          return (
+                            <span
+                              style={{
+                                background: statusBadge.bg,
+                                color: statusBadge.color,
+                                border: `1px solid ${statusBadge.border}`,
+                                padding: '0.2rem 0.5rem',
+                                borderRadius: '4px',
+                                fontSize: '0.6875rem',
+                                fontWeight: 500,
+                              }}
+                              id={`parcel-status-badge-${parcel.parcelId}`}
+                            >
+                              {statusBadge.label}
+                            </span>
+                          );
+                        })()}
                       </td>
 
                       <td style={{ padding: '0.875rem 1rem', verticalAlign: 'middle', textAlign: 'right' }}>
@@ -454,7 +474,7 @@ export function ParcelsSection({
                           >
                             📋 Reports
                           </button>
-                          {canAddOrEdit && (
+                          {canEditParcel && (
                             <button
                               type="button"
                               onClick={() => setEditingParcel(item)}
@@ -505,7 +525,9 @@ export function ParcelsSection({
           caseStatus={caseStatus}
           currentUserId={currentUserId}
           userRoles={userRoles}
-          canEdit={canAddOrEdit}
+          isSuperAdmin={isSuperAdmin}
+          isVerifiedLandOfficer={isVerifiedLandOfficer}
+          canEdit={canAddOrEdit && !viewingParcel.isLocked && !viewingParcel.isAccepted}
           onClose={() => setViewingParcel(null)}
           onOpenEdit={() => {
             const current = viewingParcel;

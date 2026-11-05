@@ -12,6 +12,7 @@ import {
 } from '../../db/schema/acquisition-case-parcels';
 import { users } from '../../db/schema/users';
 import type { GeoJsonGeometry } from '../validators/spatial/boundary.schema';
+import { ConflictError } from '../types/errors';
 
 export type TransactionClient = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -49,6 +50,9 @@ export interface CaseParcelWithDetails {
     name: string;
     email: string;
   };
+  latestReportStatus?: string | null;
+  isAccepted?: boolean;
+  isLocked?: boolean;
 }
 
 export interface ListCaseParcelsResult {
@@ -404,7 +408,22 @@ export class ParcelRepository {
         lp.updated_at AS "lp_updatedAt",
         u.id AS "u_id",
         u.name AS "u_name",
-        u.email AS "u_email"
+        u.email AS "u_email",
+        (
+          SELECT fvr.status
+          FROM field_verification_reports fvr
+          WHERE fvr.case_parcel_id = acp.id
+          ORDER BY fvr.revision_number DESC, fvr.submitted_at DESC NULLS LAST, fvr.created_at DESC
+          LIMIT 1
+        ) AS "latestReportStatus",
+        EXISTS (
+          SELECT 1 FROM field_verification_reports fvr
+          WHERE fvr.case_parcel_id = acp.id AND fvr.status = 'ACCEPTED'
+        ) AS "isAccepted",
+        EXISTS (
+          SELECT 1 FROM field_verification_reports fvr
+          WHERE fvr.case_parcel_id = acp.id AND fvr.status != 'DRAFT'
+        ) AS "isLocked"
       FROM acquisition_case_parcels acp
       INNER JOIN land_parcels lp ON lp.id = acp.parcel_id
       INNER JOIN users u ON u.id = acp.created_by
@@ -449,6 +468,9 @@ export class ParcelRepository {
         name: String(row.u_name),
         email: String(row.u_email),
       },
+      latestReportStatus: row.latestReportStatus ? String(row.latestReportStatus) : null,
+      isAccepted: Boolean(row.isAccepted),
+      isLocked: Boolean(row.isLocked),
     };
   }
 
@@ -492,6 +514,33 @@ export class ParcelRepository {
     txClient?: TransactionClient
   ): Promise<AcquisitionCaseParcel> {
     const executor = (txClient ?? db) as typeof db;
+
+    // Backend locking enforcement:
+    // Reject update if parcel is accepted or has submitted reports
+    const [statusRow] = await executor.execute(sql`
+      SELECT
+        EXISTS (
+          SELECT 1 FROM field_verification_reports fvr
+          WHERE fvr.case_parcel_id = ${id}::uuid AND fvr.status = 'ACCEPTED'
+        ) AS "isAccepted",
+        EXISTS (
+          SELECT 1 FROM field_verification_reports fvr
+          WHERE fvr.case_parcel_id = ${id}::uuid AND fvr.status != 'DRAFT'
+        ) AS "isLocked"
+    `);
+
+    if (statusRow?.isAccepted) {
+      throw new ConflictError(
+        'Cannot update parcel: field verification for this parcel has been accepted and is permanently locked'
+      );
+    }
+
+    if (statusRow?.isLocked) {
+      throw new ConflictError(
+        'Cannot update parcel: a field verification report has already been submitted for this parcel'
+      );
+    }
+
     const updateData: Partial<NewAcquisitionCaseParcel> & { updatedAt: Date } = {
       updatedAt: new Date(),
     };
@@ -580,7 +629,22 @@ export class ParcelRepository {
         lp.updated_at AS "lp_updatedAt",
         u.id AS "u_id",
         u.name AS "u_name",
-        u.email AS "u_email"
+        u.email AS "u_email",
+        (
+          SELECT fvr.status
+          FROM field_verification_reports fvr
+          WHERE fvr.case_parcel_id = acp.id
+          ORDER BY fvr.revision_number DESC, fvr.submitted_at DESC NULLS LAST, fvr.created_at DESC
+          LIMIT 1
+        ) AS "latestReportStatus",
+        EXISTS (
+          SELECT 1 FROM field_verification_reports fvr
+          WHERE fvr.case_parcel_id = acp.id AND fvr.status = 'ACCEPTED'
+        ) AS "isAccepted",
+        EXISTS (
+          SELECT 1 FROM field_verification_reports fvr
+          WHERE fvr.case_parcel_id = acp.id AND fvr.status != 'DRAFT'
+        ) AS "isLocked"
       FROM acquisition_case_parcels acp
       INNER JOIN land_parcels lp ON lp.id = acp.parcel_id
       INNER JOIN users u ON u.id = acp.created_by
@@ -625,6 +689,9 @@ export class ParcelRepository {
         name: String(row.u_name),
         email: String(row.u_email),
       },
+      latestReportStatus: row.latestReportStatus ? String(row.latestReportStatus) : null,
+      isAccepted: Boolean(row.isAccepted),
+      isLocked: Boolean(row.isLocked),
     }));
 
     return { data, total };

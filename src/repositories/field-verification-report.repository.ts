@@ -70,6 +70,10 @@ export interface FieldVerificationReportWithDetails extends FieldVerificationRep
 export interface CaseVerificationSummary {
   caseId: string;
   totalParcels: number;
+  parcelsAwaitingSubmission: number;
+  parcelsAwaitingReview: number;
+  acceptedParcels: number;
+  discrepancyFlaggedParcels: number;
   parcelsWithSubmittedReports: number;
   reportsAwaitingReview: number;
   acceptedReports: number;
@@ -567,6 +571,20 @@ export class FieldVerificationReportRepository {
       .from(fieldVerificationEvidence)
       .where(eq(fieldVerificationEvidence.reportId, reportId))
       .orderBy(fieldVerificationEvidence.createdAt);
+  }
+
+  /**
+   * Checks whether a parcel has an ACCEPTED field verification report.
+   */
+  async isParcelAccepted(caseParcelId: string, txClient?: TransactionClient): Promise<boolean> {
+    const executor = (txClient ?? db) as typeof db;
+    const [row] = await executor.execute(sql`
+      SELECT EXISTS (
+        SELECT 1 FROM field_verification_reports
+        WHERE case_parcel_id = ${caseParcelId}::uuid AND status = 'ACCEPTED'
+      ) AS "isAccepted"
+    `);
+    return Boolean(row?.isAccepted);
   }
 
   /**
@@ -1110,6 +1128,21 @@ export class FieldVerificationReportRepository {
           p.latestReportStatus !== 'RETURNED_FOR_CORRECTION'
       ).length;
 
+    const acceptedParcels = parcelsSummary.filter(
+      (p) => p.currentVerificationStatus === 'VERIFIED_ACCEPTED'
+    ).length;
+    const parcelsAwaitingReview = parcelsSummary.filter(
+      (p) => p.currentVerificationStatus === 'AWAITING_REVIEW'
+    ).length;
+    const parcelsAwaitingSubmission = parcelsSummary.filter(
+      (p) =>
+        p.currentVerificationStatus === 'PENDING_INSPECTION' ||
+        p.currentVerificationStatus === 'DRAFT_IN_PROGRESS'
+    ).length;
+    const discrepancyFlaggedParcels = parcelsSummary.filter(
+      (p) => p.currentVerificationStatus === 'DISCREPANCY_FLAGGED'
+    ).length;
+
     const discrepancyCounts = await discrepancyRepository.getCaseDiscrepancyCounts(
       caseId,
       txClient
@@ -1118,6 +1151,10 @@ export class FieldVerificationReportRepository {
     return {
       caseId,
       totalParcels,
+      parcelsAwaitingSubmission,
+      parcelsAwaitingReview,
+      acceptedParcels,
+      discrepancyFlaggedParcels,
       parcelsWithSubmittedReports: parcelsWithSubmittedReportsSet.size,
       reportsAwaitingReview,
       acceptedReports,

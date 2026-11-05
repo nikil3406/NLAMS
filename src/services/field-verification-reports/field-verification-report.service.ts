@@ -5,6 +5,7 @@ import {
 } from '../../repositories/field-verification-report.repository';
 import { parcelRepository } from '../../repositories/parcel.repository';
 import { acquisitionCaseRepository } from '../../repositories/acquisition-case.repository';
+import { userRepository } from '../../repositories/user.repository';
 import { permissionService } from '../authorization/permission.service';
 import { scopeService } from '../authorization/scope.service';
 import {
@@ -127,6 +128,44 @@ export class FieldVerificationReportService {
   }
 
   /**
+   * Asserts that the caller is an active, verified Land Officer (or Super Admin).
+   * Enforces:
+   * - User account exists and has status === 'ACTIVE' (inactive/suspended users blocked).
+   * - SUPER_ADMIN does NOT bypass user status check.
+   * - Caller must hold LAND_OFFICER role or SUPER_ADMIN role.
+   * - Non-super-admins must have active administrative unit assignments (unverified status blocked).
+   */
+  private async assertVerifiedLandOfficer(userId: string) {
+    const user = await userRepository.findUserById(userId);
+    if (!user) {
+      throw new ForbiddenError('Forbidden: User not found');
+    }
+    if (user.status !== 'ACTIVE') {
+      throw new ForbiddenError(
+        `Forbidden: User account status is '${user.status}'. Only active and verified Land Officers may review reports.`
+      );
+    }
+
+    const isSuper = await permissionService.isSuperAdmin(userId);
+    const callerRoles = await permissionService.getUserRoles(userId);
+
+    if (!isSuper && !callerRoles.includes('LAND_OFFICER')) {
+      throw new ForbiddenError(
+        'Forbidden: Only an authorized Land Officer or Super Admin may review field verification reports'
+      );
+    }
+
+    if (!isSuper) {
+      const assignedUnits = await scopeService.getUserAssignedUnits(userId);
+      if (assignedUnits.length === 0) {
+        throw new ForbiddenError(
+          'Forbidden: Land Officer has no active administrative unit assignment (unverified status)'
+        );
+      }
+    }
+  }
+
+  /**
    * Creates a draft report for an authorized parcel association.
    */
   async createDraftReport(
@@ -137,6 +176,13 @@ export class FieldVerificationReportService {
   ): Promise<FieldVerificationReportWithDetails> {
     await this.assertFieldOfficerManagementAccess(caseId, userId);
     await this.assertCaseParcelBelongsToCase(caseParcelId, caseId);
+
+    const isAccepted = await fieldVerificationReportRepository.isParcelAccepted(caseParcelId);
+    if (isAccepted) {
+      throw new ConflictError(
+        'Cannot create report: field verification for this parcel has already been accepted and is permanently locked'
+      );
+    }
 
     const report = await fieldVerificationReportRepository.createReport(
       {
@@ -170,6 +216,13 @@ export class FieldVerificationReportService {
     await this.assertFieldOfficerManagementAccess(caseId, userId);
     await this.assertCaseParcelBelongsToCase(caseParcelId, caseId);
     const existing = await this.assertReportBelongsToCaseParcel(reportId, caseParcelId);
+
+    const isAccepted = await fieldVerificationReportRepository.isParcelAccepted(caseParcelId);
+    if (isAccepted) {
+      throw new ConflictError(
+        'Cannot submit report: parcel verification has already been accepted and is permanently locked'
+      );
+    }
 
     // Enforce author-only editing
     if (existing.createdBy !== userId) {
@@ -359,6 +412,13 @@ export class FieldVerificationReportService {
     await this.assertCaseParcelBelongsToCase(caseParcelId, caseId);
     const existing = await this.assertReportBelongsToCaseParcel(reportId, caseParcelId);
 
+    const isAccepted = await fieldVerificationReportRepository.isParcelAccepted(caseParcelId);
+    if (isAccepted) {
+      throw new ConflictError(
+        'Cannot submit report: parcel verification has already been accepted and is permanently locked'
+      );
+    }
+
     // Enforce author-only submission
     if (existing.createdBy !== userId) {
       throw new ForbiddenError(
@@ -467,17 +527,9 @@ export class FieldVerificationReportService {
     input: ReviewFieldVerificationReportInput,
     userId: string
   ): Promise<FieldVerificationReportWithDetails> {
+    await this.assertVerifiedLandOfficer(userId);
     await this.assertCaseViewAccess(caseId, userId);
     await this.assertCaseParcelBelongsToCase(caseParcelId, caseId);
-
-    // Role check: Only LAND_OFFICER or SUPER_ADMIN may review field verification reports
-    const isSuper = await permissionService.isSuperAdmin(userId);
-    const callerRoles = await permissionService.getUserRoles(userId);
-    if (!isSuper && !callerRoles.includes('LAND_OFFICER')) {
-      throw new ForbiddenError(
-        'Forbidden: Only an authorized Land Officer or Super Admin may review field verification reports'
-      );
-    }
 
     const report = await this.assertReportBelongsToCaseParcel(reportId, caseParcelId);
 
@@ -553,6 +605,13 @@ export class FieldVerificationReportService {
     await this.assertCaseParcelBelongsToCase(caseParcelId, caseId);
     const existing = await this.assertReportBelongsToCaseParcel(reportId, caseParcelId);
 
+    const isAccepted = await fieldVerificationReportRepository.isParcelAccepted(caseParcelId);
+    if (isAccepted) {
+      throw new ConflictError(
+        'Cannot submit report: parcel verification has already been accepted and is permanently locked'
+      );
+    }
+
     // Enforce author-only correction
     if (existing.createdBy !== userId) {
       throw new ForbiddenError(
@@ -584,16 +643,10 @@ export class FieldVerificationReportService {
     query: ListReviewQueueQuery,
     userId: string
   ): Promise<PaginatedReportsResult> {
+    await this.assertVerifiedLandOfficer(userId);
     await permissionService.requirePermission(userId, 'ACQUISITION_CASE_VIEW');
 
     const isSuper = await permissionService.isSuperAdmin(userId);
-    const callerRoles = await permissionService.getUserRoles(userId);
-
-    if (!isSuper && !callerRoles.includes('LAND_OFFICER')) {
-      throw new ForbiddenError(
-        'Forbidden: Only an authorized Land Officer or Super Admin may access the review queue'
-      );
-    }
 
     let allowedUnitIds: string[] | undefined;
 

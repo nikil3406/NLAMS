@@ -11,6 +11,8 @@ interface ParcelDetailModalProps {
   caseStatus?: string;
   currentUserId?: string;
   userRoles?: string[];
+  isSuperAdmin?: boolean;
+  isVerifiedLandOfficer?: boolean;
   canEdit: boolean;
   onClose: () => void;
   onOpenEdit: () => void;
@@ -22,6 +24,8 @@ export function ParcelDetailModal({
   caseStatus,
   currentUserId,
   userRoles,
+  isSuperAdmin = false,
+  isVerifiedLandOfficer = true,
   canEdit,
   onClose,
   onOpenEdit,
@@ -382,7 +386,8 @@ export function ParcelDetailModal({
           caseParcelId={item.id}
           currentUserId={currentUserId || ''}
           userRoles={userRoles || []}
-          isSuperAdmin={false}
+          isSuperAdmin={isSuperAdmin}
+          isVerifiedLandOfficer={isVerifiedLandOfficer}
           onClose={() => setActiveReviewModal({ isOpen: false, reportData: null })}
           onDecisionSuccess={() => {
             setActiveReviewModal({ isOpen: false, reportData: null });
