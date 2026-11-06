@@ -34,6 +34,12 @@ const STATUS_BADGE_STYLES: Record<
     border: 'rgba(16, 185, 129, 0.3)',
     label: 'Awaiting Field Verification',
   },
+  FIELD_VERIFICATION_COMPLETED: {
+    bg: 'rgba(5, 150, 105, 0.18)',
+    color: '#10b981',
+    border: 'rgba(5, 150, 105, 0.4)',
+    label: '✓ Field Verification Completed',
+  },
   RETURNED_FOR_CORRECTION: {
     bg: 'rgba(245, 158, 11, 0.12)',
     color: '#fbbf24',

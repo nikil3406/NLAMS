@@ -8,6 +8,8 @@ import type { AcquisitionCaseStatus } from '../../../../../db/schema/acquisition
 import { ParcelsSection } from './parcels-section';
 import { DiscrepanciesSection } from './discrepancies-section';
 import { CaseVerificationReviewsSection } from './case-verification-reviews-section';
+import { CaseVerificationCompletionCard } from './case-verification-completion-card';
+import type { CaseCompletionEligibility } from '../../../../services/acquisition-cases/field-verification-completion.service';
 import type { CaseDiscrepancyCounts } from '../../../../repositories/discrepancy.repository';
 
 interface AcquisitionCaseDetailsClientProps {
@@ -40,6 +42,12 @@ const STATUS_BADGE_STYLES: Record<
     color: '#34d399',
     border: 'rgba(16, 185, 129, 0.3)',
     label: 'Awaiting Field Verification',
+  },
+  FIELD_VERIFICATION_COMPLETED: {
+    bg: 'rgba(5, 150, 105, 0.18)',
+    color: '#10b981',
+    border: 'rgba(5, 150, 105, 0.4)',
+    label: '✓ Field Verification Completed',
   },
   RETURNED_FOR_CORRECTION: {
     bg: 'rgba(245, 158, 11, 0.12)',
@@ -76,10 +84,19 @@ export function AcquisitionCaseDetailsClient({
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   // Tab Navigation State
-  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'PARCELS' | 'DISCREPANCIES'>('OVERVIEW');
+  type TabType = 'OVERVIEW' | 'PARCELS' | 'VERIFICATION' | 'DISCREPANCIES';
+  const [activeTab, setActiveTab] = useState<TabType>('OVERVIEW');
   const [discrepancyCounts, setDiscrepancyCounts] = useState<CaseDiscrepancyCounts | null>(null);
+  const handleDiscrepancyCountChange = useCallback((cnts: CaseDiscrepancyCounts) => {
+    setDiscrepancyCounts((prev) => {
+      if (prev && prev.totalDiscrepancies === cnts.totalDiscrepancies && prev.openDiscrepancies === cnts.openDiscrepancies) return prev;
+      return cnts;
+    });
+  }, []);
   const [parcelCount, setParcelCount] = useState<number>(0);
   const [verificationSummary, setVerificationSummary] = useState<CaseVerificationSummary | null>(null);
+  const [completionEligibility, setCompletionEligibility] = useState<CaseCompletionEligibility | null>(null);
+  const [isLoadingEligibility, setIsLoadingEligibility] = useState<boolean>(false);
 
   // Edit Modal State
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -101,6 +118,21 @@ export function AcquisitionCaseDetailsClient({
   const [isDecisionConfirmed, setIsDecisionConfirmed] = useState(false);
   const [isRecordingDecision, setIsRecordingDecision] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
+
+  const fetchCompletionEligibility = useCallback(async () => {
+    setIsLoadingEligibility(true);
+    try {
+      const res = await fetch(`/api/acquisition-cases/${caseId}/verification-completion`);
+      if (res.ok) {
+        const json = await res.json();
+        setCompletionEligibility(json.data);
+      }
+    } catch {
+      // Ignore background eligibility fetch error if non-LO
+    } finally {
+      setIsLoadingEligibility(false);
+    }
+  }, [caseId]);
 
   const loadCase = useCallback(async () => {
     setIsLoading(true);
@@ -136,6 +168,7 @@ export function AcquisitionCaseDetailsClient({
             const summaryJson = await summaryRes.json();
             if (summaryJson.success && summaryJson.data) {
               setVerificationSummary(summaryJson.data);
+        fetchCompletionEligibility();
             if (summaryJson.data.discrepanciesSummary) {
               setDiscrepancyCounts(summaryJson.data.discrepanciesSummary);
             }
@@ -796,6 +829,18 @@ export function AcquisitionCaseDetailsClient({
 
       {activeTab === 'OVERVIEW' && (
         <>
+          {/* Field Verification Completion Card */}
+          <CaseVerificationCompletionCard
+            caseId={caseId}
+            caseStatus={acqCase.status}
+            eligibility={completionEligibility}
+            isLoading={isLoadingEligibility}
+            isVerifiedLandOfficer={isVerifiedLandOfficer}
+            onCompleted={() => {
+              loadCase();
+              setSuccessMessage('Field verification completed successfully! Case status updated.');
+            }}
+          />
           {/* Two Column Overview */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
         {/* Linked Project Card */}
@@ -1254,7 +1299,7 @@ export function AcquisitionCaseDetailsClient({
           currentUserId={currentUserId}
           userRoles={userRoles}
           isSuperAdmin={isSuperAdmin}
-          onCountChange={(cnts) => setDiscrepancyCounts(cnts)}
+          onCountChange={handleDiscrepancyCountChange}
         />
       )}
 
@@ -1267,10 +1312,7 @@ export function AcquisitionCaseDetailsClient({
           isSuperAdmin={isSuperAdmin}
           isVerifiedLandOfficer={isVerifiedLandOfficer}
           verificationSummary={verificationSummary}
-          onReviewDecisionRecorded={() => {
-            fetchVerificationSummary();
-            fetchParcelsCount();
-          }}
+          onReviewDecisionRecorded={() => { loadCase(); }}
         />
       )}
 

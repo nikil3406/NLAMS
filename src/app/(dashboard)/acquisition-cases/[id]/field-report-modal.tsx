@@ -154,6 +154,7 @@ export function FieldReportModal({
   }, [fetchReport, initialReport, reportId]);
 
   const isDraft = report ? report.status === 'DRAFT' : true;
+  const isSubmitted = report ? report.status !== 'DRAFT' : false;
   const isAuthor = report ? report.createdBy === currentUserId : true;
   const canEdit = isDraft && isAuthor && isFieldOfficer && isAwaitingVerification;
 
@@ -491,8 +492,8 @@ export function FieldReportModal({
               <span>🔒</span>
               <div>
                 <strong>Official Historical Record:</strong> Submitted on{' '}
-                {report.submittedAt ? new Date(report.submittedAt).toLocaleString() : ''} by{' '}
-                {report.verifier?.name || 'Authorized Field Officer'}. This report is immutable and pending Land Officer review.
+                {report?.submittedAt ? new Date(report.submittedAt).toLocaleString() : ''} by{' '}
+                {report?.verifier?.name || 'Authorized Field Officer'}. This report is immutable and pending Land Officer review.
               </div>
             </div>
           )}

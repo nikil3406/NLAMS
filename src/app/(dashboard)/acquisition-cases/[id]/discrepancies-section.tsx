@@ -51,6 +51,10 @@ export function DiscrepanciesSection({
 }: DiscrepanciesSectionProps) {
   const [discrepancies, setDiscrepancies] = useState<DiscrepancyWithDetails[]>([]);
   const [counts, setCounts] = useState<CaseDiscrepancyCounts | null>(null);
+  const onCountChangeRef = React.useRef(onCountChange);
+  useEffect(() => {
+    onCountChangeRef.current = onCountChange;
+  }, [onCountChange]);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -78,15 +82,15 @@ export function DiscrepanciesSection({
       const json = await res.json();
       setDiscrepancies(json.data || []);
       setCounts(json.counts);
-      if (onCountChange && json.counts) {
-        onCountChange(json.counts);
+      if (onCountChangeRef.current && json.counts) {
+        onCountChangeRef.current(json.counts);
       }
     } catch (err: unknown) {
       setErrorMessage(err instanceof Error ? err.message : 'Error loading discrepancies');
     } finally {
       setIsLoading(false);
     }
-  }, [caseId, statusFilter, categoryFilter, onCountChange]);
+  }, [caseId, statusFilter, categoryFilter]);
 
   useEffect(() => {
     fetchDiscrepancies();
@@ -249,7 +253,7 @@ export function DiscrepanciesSection({
             ) : (
               discrepancies.map((d) => {
                 const badge = STATUS_BADGES[d.status] || STATUS_BADGES.OPEN;
-                const latestInv = d.investigations[0] || null;
+                const latestInv = d.investigations?.[0] || null;
 
                 return (
                   <tr key={d.id} style={{ borderBottom: '1px solid #334155' }}>
@@ -257,8 +261,8 @@ export function DiscrepanciesSection({
                       #{d.id.slice(0, 8)}
                     </td>
                     <td style={{ padding: '0.75rem 1rem', color: '#f8fafc' }}>
-                      <div>{d.parcel.parcelId}</div>
-                      <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Survey #{d.parcel.surveyNumber} &bull; {d.parcel.village}</div>
+                      <div>{d.parcel?.parcelId || 'N/A'}</div>
+                      <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Survey #{d.parcel?.surveyNumber || '-'} &bull; {d.parcel?.village || '-'}</div>
                     </td>
                     <td style={{ padding: '0.75rem 1rem' }}>
                       <span style={{ backgroundColor: '#334155', color: '#cbd5e1', padding: '0.2rem 0.5rem', borderRadius: '0.25rem', fontSize: '0.75rem' }}>
@@ -266,13 +270,13 @@ export function DiscrepanciesSection({
                       </span>
                     </td>
                     <td style={{ padding: '0.75rem 1rem', color: '#cbd5e1' }}>
-                      <div>Rev #{d.report.revisionNumber} ({d.report.outcome})</div>
-                      <div style={{ fontSize: '0.75rem', color: '#64748b' }}>{d.report.status}</div>
+                      <div>Rev #{d.report?.revisionNumber ?? 1} ({d.report?.outcome || '-'})</div>
+                      <div style={{ fontSize: '0.75rem', color: '#64748b' }}>{d.report?.status || '-'}</div>
                     </td>
                     <td style={{ padding: '0.75rem 1rem', color: '#cbd5e1' }}>
                       {latestInv ? (
                         <div>
-                          <div>{latestInv.investigator.name}</div>
+                          <div>{latestInv.investigator?.name || 'Officer'}</div>
                           <div style={{ fontSize: '0.75rem', color: '#64748b' }}>{latestInv.status}</div>
                         </div>
                       ) : (
