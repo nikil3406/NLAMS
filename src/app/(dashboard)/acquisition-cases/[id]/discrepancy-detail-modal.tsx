@@ -49,9 +49,8 @@ export function DiscrepancyDetailModal({
   onClose,
   onDiscrepancyUpdated,
 }: DiscrepancyDetailModalProps) {
-  const isLandOfficer = isSuperAdmin || userRoles.includes('LAND_OFFICER');
-  const isFieldOfficer = isSuperAdmin || userRoles.includes('FIELD_OFFICER');
-  const isProjectOfficer = isSuperAdmin || userRoles.includes('PROJECT_OFFICER');
+  const isLandOfficer = userRoles.includes('LAND_OFFICER');
+  const isFieldOfficer = userRoles.includes('FIELD_OFFICER');
 
   const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'INVESTIGATIONS' | 'RESOLUTION'>('OVERVIEW');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -86,18 +85,27 @@ export function DiscrepancyDetailModal({
   const [isSubmittingResolution, setIsSubmittingResolution] = useState(false);
 
   const latestInvestigation = discrepancy.investigations[0] || null;
+
+  // Land Officer is the assigned investigator who conducts the investigation
+  const canInvestigate = isLandOfficer;
   const isInvestigator =
+    canInvestigate &&
     activeDraft &&
     (activeDraft.investigatorId === currentUserId || activeDraft.createdBy === currentUserId || isSuperAdmin);
 
-  // Separation of duties for resolution: Decision maker cannot be the investigator
+  // Separation of duties: Investigator cannot approve/close the investigation
   const isSubmittedInvestigator =
     latestInvestigation &&
     latestInvestigation.status === 'SUBMITTED' &&
     (latestInvestigation.investigatorId === currentUserId || latestInvestigation.createdBy === currentUserId);
 
+  // Only the original Field Officer who created the discrepancy can review findings and confirm closure or request further investigation
+  const isOriginalFieldOfficer =
+    currentUserId === discrepancy.createdBy &&
+    (isFieldOfficer || isSuperAdmin);
+
   const canResolve =
-    (isLandOfficer || isProjectOfficer || isSuperAdmin) &&
+    isOriginalFieldOfficer &&
     discrepancy.status === 'SUBMITTED_FOR_RESOLUTION' &&
     !isSubmittedInvestigator;
 
@@ -467,13 +475,13 @@ export function DiscrepancyDetailModal({
               {/* Discrepancy Reason */}
               <div style={{ backgroundColor: '#1e293b', padding: '1rem', borderRadius: '0.5rem', border: '1px solid #334155' }}>
                 <h3 style={{ fontSize: '0.875rem', color: '#94a3b8', textTransform: 'uppercase', margin: '0 0 0.5rem 0' }}>
-                  Land Officer Flagging Reason
+                  Reported Discrepancy Observation
                 </h3>
                 <p style={{ margin: 0, color: '#f8fafc', fontSize: '0.925rem', whiteSpace: 'pre-wrap' }}>
                   {discrepancy.description}
                 </p>
                 <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.5rem' }}>
-                  Flagged by {discrepancy.creator.name} ({discrepancy.creator.email}) on {new Date(discrepancy.createdAt).toLocaleString()}
+                  Reported by Field Officer {discrepancy.creator.name} ({discrepancy.creator.email}) on {new Date(discrepancy.createdAt).toLocaleString()}
                 </div>
               </div>
 
@@ -538,18 +546,39 @@ export function DiscrepancyDetailModal({
           {/* TAB 2: INVESTIGATION */}
           {activeTab === 'INVESTIGATIONS' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-              {/* Trigger button to start investigation if OPEN */}
-              {discrepancy.status === 'OPEN' && !isStartingInvestigation && (
+              {/* If returned for further investigation, show return context banner */}
+              {discrepancy.status === 'UNDER_INVESTIGATION' && !activeDraft && (
+                <div style={{ backgroundColor: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.4)', borderRadius: '0.5rem', padding: '1rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#fbbf24', fontWeight: 600, fontSize: '0.9rem', marginBottom: '0.35rem' }}>
+                    <span>⚠️ Returned for Further Investigation</span>
+                  </div>
+                  <p style={{ margin: '0 0 0.5rem 0', color: '#cbd5e1', fontSize: '0.85rem' }}>
+                    The original reporting Field Officer ({discrepancy.creator.name}) reviewed the findings and requested further action:
+                  </p>
+                  {discrepancy.resolutionHistory[0]?.remarks && (
+                    <div style={{ backgroundColor: '#0f172a', padding: '0.75rem', borderRadius: '0.375rem', color: '#f8fafc', fontSize: '0.85rem', fontStyle: 'italic', borderLeft: '3px solid #f59e0b' }}>
+                      "{discrepancy.resolutionHistory[0].remarks}"
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Trigger button to start investigation if OPEN or returned without active draft */}
+              {!activeDraft && (discrepancy.status === 'OPEN' || discrepancy.status === 'UNDER_INVESTIGATION') && !isStartingInvestigation && (
                 <div style={{ backgroundColor: '#1e293b', padding: '1rem', borderRadius: '0.5rem', border: '1px dashed #3b82f6', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
                     <h4 style={{ margin: '0 0 0.25rem 0', color: '#f8fafc', fontSize: '0.95rem' }}>
-                      No active investigation
+                      {discrepancy.status === 'UNDER_INVESTIGATION' ? 'Start Follow-up Investigation' : 'No active investigation'}
                     </h4>
                     <p style={{ margin: 0, color: '#94a3b8', fontSize: '0.85rem' }}>
-                      Start an investigation to record site inspection findings and attach supporting evidence.
+                      {canInvestigate
+                        ? discrepancy.status === 'UNDER_INVESTIGATION'
+                          ? 'Initiate a new investigation iteration to address the return remarks and attach additional evidence.'
+                          : 'Investigate this reported discrepancy and record inspection findings and evidence.'
+                        : 'Awaiting an authorized Land Officer to investigate the discrepancy and submit findings.'}
                     </p>
                   </div>
-                  {(isFieldOfficer || isLandOfficer || isSuperAdmin) && (
+                  {canInvestigate && (
                     <button
                       onClick={() => setIsStartingInvestigation(true)}
                       style={{
@@ -563,7 +592,7 @@ export function DiscrepancyDetailModal({
                         cursor: 'pointer',
                       }}
                     >
-                      Start Investigation
+                      {discrepancy.status === 'UNDER_INVESTIGATION' ? 'Start Follow-up Investigation' : 'Start Investigation'}
                     </button>
                   )}
                 </div>
@@ -581,7 +610,9 @@ export function DiscrepancyDetailModal({
                   }}
                 >
                   <h4 style={{ margin: '0 0 0.75rem 0', color: '#60a5fa', fontSize: '1rem' }}>
-                    Start New Investigation
+                    {discrepancy.status === 'UNDER_INVESTIGATION'
+                      ? `Start Follow-up Investigation (Iteration #${discrepancy.investigations.length + 1})`
+                      : 'Start New Investigation'}
                   </h4>
                   <div style={{ marginBottom: '1rem' }}>
                     <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.25rem' }}>
@@ -591,7 +622,11 @@ export function DiscrepancyDetailModal({
                       value={startNotes}
                       onChange={(e) => setStartNotes(e.target.value)}
                       rows={3}
-                      placeholder="Outline instructions, focus areas, or scheduled site visit..."
+                      placeholder={
+                        discrepancy.status === 'UNDER_INVESTIGATION'
+                          ? 'Detail the follow-up scope, corrective re-inspection, or documents to obtain...'
+                          : 'Outline instructions, focus areas, or scheduled site visit...'
+                      }
                       style={{
                         width: '100%',
                         backgroundColor: '#0f172a',
@@ -633,7 +668,7 @@ export function DiscrepancyDetailModal({
                         opacity: isSubmittingStart ? 0.6 : 1,
                       }}
                     >
-                      {isSubmittingStart ? 'Starting...' : 'Confirm & Start'}
+                      {isSubmittingStart ? 'Starting...' : discrepancy.status === 'UNDER_INVESTIGATION' ? 'Confirm & Start Follow-up' : 'Confirm & Start'}
                     </button>
                   </div>
                 </form>
@@ -910,15 +945,15 @@ export function DiscrepancyDetailModal({
               {discrepancy.status === 'SUBMITTED_FOR_RESOLUTION' && (
                 <div style={{ backgroundColor: '#1e293b', padding: '1.25rem', borderRadius: '0.5rem', border: '1px solid #3b82f6' }}>
                   <h4 style={{ margin: '0 0 0.5rem 0', color: '#60a5fa', fontSize: '1rem' }}>
-                    Record Resolution Decision
+                    Review Investigation Findings & Closure
                   </h4>
                   <p style={{ margin: '0 0 1rem 0', color: '#94a3b8', fontSize: '0.85rem' }}>
-                    Review submitted findings and record an independent administrative resolution decision.
+                    Original reporting Field Officer reviews submitted findings to confirm resolution or request further investigation.
                   </p>
 
                   {isSubmittedInvestigator ? (
                     <div style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', border: '1px solid #ef4444', color: '#f87171', padding: '0.75rem', borderRadius: '0.375rem', fontSize: '0.85rem' }}>
-                      Separation of duties: As the investigator who submitted the findings, you are not permitted to resolve this discrepancy. Another authorized officer must decide.
+                      Separation of duties: As the investigator who submitted the findings, you are not permitted to close this discrepancy.
                     </div>
                   ) : canResolve ? (
                     <form onSubmit={handleResolve}>
@@ -931,7 +966,7 @@ export function DiscrepancyDetailModal({
                             checked={resolutionDecision === 'RESOLVED'}
                             onChange={() => setResolutionDecision('RESOLVED')}
                           />
-                          Resolve Discrepancy
+                          Confirm Findings & Close Discrepancy
                         </label>
                         <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#f8fafc', fontSize: '0.875rem', cursor: 'pointer' }}>
                           <input
@@ -941,19 +976,19 @@ export function DiscrepancyDetailModal({
                             checked={resolutionDecision === 'RETURNED_FOR_FURTHER_INVESTIGATION'}
                             onChange={() => setResolutionDecision('RETURNED_FOR_FURTHER_INVESTIGATION')}
                           />
-                          Return for Further Investigation
+                          Request Further Investigation
                         </label>
                       </div>
 
                       <div style={{ marginBottom: '1rem' }}>
                         <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.25rem' }}>
-                          Resolution Remarks / Reason <span style={{ color: '#ef4444' }}>*</span>
+                          Review Remarks / Reason <span style={{ color: '#ef4444' }}>*</span>
                         </label>
                         <textarea
                           value={resolutionRemarks}
                           onChange={(e) => setResolutionRemarks(e.target.value)}
                           rows={3}
-                          placeholder="Provide detailed administrative justification for this resolution decision..."
+                          placeholder="Provide detailed feedback or confirmation explaining your review decision..."
                           style={{
                             width: '100%',
                             backgroundColor: '#0f172a',
@@ -973,7 +1008,7 @@ export function DiscrepancyDetailModal({
                             checked={isConfirmingResolution}
                             onChange={(e) => setIsConfirmingResolution(e.target.checked)}
                           />
-                          I confirm this resolution decision based on verified site findings.
+                          I confirm that I have reviewed the submitted investigation findings.
                         </label>
                       </div>
 
@@ -993,14 +1028,18 @@ export function DiscrepancyDetailModal({
                             opacity: isSubmittingResolution ? 0.6 : 1,
                           }}
                         >
-                          {isSubmittingResolution ? 'Recording...' : `Submit Decision: ${resolutionDecision === 'RESOLVED' ? 'RESOLVE' : 'RETURN'}`}
+                          {isSubmittingResolution ? 'Submitting...' : resolutionDecision === 'RESOLVED' ? 'Confirm & Close' : 'Request Further Investigation'}
                         </button>
                       </div>
                     </form>
+                  ) : isLandOfficer ? (
+                    <div style={{ backgroundColor: 'rgba(59, 130, 246, 0.1)', border: '1px solid #3b82f6', color: '#93c5fd', padding: '0.75rem', borderRadius: '0.375rem', fontSize: '0.85rem' }}>
+                      Investigation findings have been submitted. Under NLAMS workflow, only the original Field Officer ({discrepancy.creator.name}) who reported this discrepancy may review findings and confirm closure or request further investigation.
+                    </div>
                   ) : (
-                    <p style={{ margin: 0, color: '#94a3b8', fontSize: '0.85rem' }}>
-                      You do not have permission to resolve discrepancies on this case.
-                    </p>
+                    <div style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', border: '1px solid #ef4444', color: '#f87171', padding: '0.75rem', borderRadius: '0.375rem', fontSize: '0.85rem' }}>
+                      Only the original Field Officer ({discrepancy.creator.name}) who reported this discrepancy may review findings and record closure decisions.
+                    </div>
                   )}
                 </div>
               )}

@@ -404,13 +404,14 @@ export class FieldVerificationReportRepository {
       // If decision is DISCREPANCY_FLAGGED, create or link formal discrepancy record transactionally
       if (decision === 'DISCREPANCY_FLAGGED') {
         const [acpRow] = await tx.execute(sql`
-          SELECT acp.case_id AS "caseId", acp.id AS "caseParcelId"
+          SELECT acp.case_id AS "caseId", acp.id AS "caseParcelId", fvr.verified_by AS "verifiedBy", fvr.created_by AS "createdBy"
           FROM field_verification_reports fvr
           INNER JOIN acquisition_case_parcels acp ON acp.id = fvr.case_parcel_id
           WHERE fvr.id = ${reportId}::uuid
           LIMIT 1
         `);
         if (acpRow) {
+          const originalFieldOfficerId = String(acpRow.verifiedBy ?? acpRow.createdBy ?? reviewerId);
           await discrepancyRepository.findOrCreateDiscrepancyForReport(
             {
               caseId: String(acpRow.caseId),
@@ -419,7 +420,7 @@ export class FieldVerificationReportRepository {
               reviewId: reviewEntry?.id ?? null,
               category: 'OTHER',
               description: remarks ?? 'Discrepancy flagged during field verification review',
-              createdBy: reviewerId,
+              createdBy: originalFieldOfficerId,
             },
             tx
           );

@@ -1,3 +1,11 @@
+import { and, desc, eq } from 'drizzle-orm';
+import { db } from '../../../db';
+import { acquisitionCaseParcels } from '../../../db/schema/acquisition-case-parcels';
+import { fieldVerificationReports } from '../../../db/schema/field-verification-reports';
+import {
+  fieldVerificationEvidence,
+  type FieldVerificationEvidence,
+} from '../../../db/schema/field-verification-evidence';
 import {
   discrepancyRepository,
   type DiscrepancyWithDetails,
@@ -15,13 +23,13 @@ import {
 } from '../../types/errors';
 import type {
   ListDiscrepanciesQuery,
+  CreateDiscrepancyInput,
   StartInvestigationInput,
   UpdateInvestigationInput,
   AttachInvestigationEvidenceInput,
   SubmitInvestigationInput,
   ResolveDiscrepancyInput,
 } from '../../validators/discrepancies';
-import type { FieldVerificationEvidence } from '../../../db/schema/field-verification-evidence';
 
 export class DiscrepancyService {
   /**
@@ -113,13 +121,126 @@ export class DiscrepancyService {
   }
 
   /**
+   * Creates and submits a new parcel discrepancy.
+   *
+   * Responsibility model:
+   * - Caller must be an authenticated, active FIELD_OFFICER.
+   * - Parcel must belong to the acquisition case within caller's administrative scope.
+   * - Discrepancy is initialized with status 'OPEN'.
+   * - Creator is set to the Field Officer's immutable userId.
+   */
+  async createDiscrepancy(
+    caseId: string,
+    input: CreateDiscrepancyInput,
+    userId: string
+  ): Promise<DiscrepancyWithDetails> {
+    const acqCase = await this.assertCaseAccess(caseId, userId);
+
+    const callerRoles = await permissionService.getUserRoles(userId);
+    if (!callerRoles.includes('FIELD_OFFICER')) {
+      throw new ForbiddenError(
+        'Forbidden: Only an authorized Field Officer within administrative scope may create and submit discrepancies'
+      );
+    }
+
+    // Verify parcel belongs to case
+    const [caseParcel] = await db
+      .select({ id: acquisitionCaseParcels.id })
+      .from(acquisitionCaseParcels)
+      .where(
+        and(
+          eq(acquisitionCaseParcels.id, input.caseParcelId),
+          eq(acquisitionCaseParcels.caseId, caseId)
+        )
+      )
+      .limit(1);
+
+    if (!caseParcel) {
+      throw new NotFoundError(
+        `Case parcel '${input.caseParcelId}' not found for case '${caseId}'`
+      );
+    }
+
+    // Resolve reportId
+    let reportId = input.reportId;
+    if (reportId) {
+      const [rpt] = await db
+        .select({ id: fieldVerificationReports.id })
+        .from(fieldVerificationReports)
+        .where(
+          and(
+            eq(fieldVerificationReports.id, reportId),
+            eq(fieldVerificationReports.caseParcelId, input.caseParcelId)
+          )
+        )
+        .limit(1);
+      if (!rpt) {
+        throw new NotFoundError(
+          `Field verification report '${reportId}' not found for parcel '${input.caseParcelId}'`
+        );
+      }
+    } else {
+      // Find latest report for this parcel
+      const [latestReport] = await db
+        .select({ id: fieldVerificationReports.id })
+        .from(fieldVerificationReports)
+        .where(eq(fieldVerificationReports.caseParcelId, input.caseParcelId))
+        .orderBy(desc(fieldVerificationReports.createdAt))
+        .limit(1);
+
+      if (latestReport) {
+        reportId = latestReport.id;
+      } else {
+        // If no report exists, create a report entry for this parcel
+        const now = new Date();
+        const [newReport] = await db
+          .insert(fieldVerificationReports)
+          .values({
+            caseParcelId: input.caseParcelId,
+            status: 'DISCREPANCY_FLAGGED',
+            outcome: 'DISCREPANCY_FOUND',
+            observations: input.description,
+            verifiedBy: userId,
+            createdBy: userId,
+            submittedAt: now,
+            verificationDate: now,
+          })
+          .returning({ id: fieldVerificationReports.id });
+        reportId = newReport.id;
+      }
+    }
+
+    if (input.evidence && input.evidence.length > 0 && reportId) {
+      for (const ev of input.evidence) {
+        await db.insert(fieldVerificationEvidence).values({
+          reportId,
+          evidenceType: ev.evidenceType,
+          fileReference: ev.fileReference.trim(),
+          caption: ev.caption?.trim() || null,
+          description: ev.description?.trim() || null,
+          createdBy: userId,
+        });
+      }
+    }
+
+    return discrepancyRepository.findOrCreateDiscrepancyForReport({
+      caseId,
+      caseParcelId: input.caseParcelId,
+      reportId,
+      category: input.category,
+      description: input.description.trim(),
+      createdBy: userId,
+    });
+  }
+
+  /**
    * Starts a new investigation for a discrepancy.
    *
    * Authorization rules:
    * - Caller must have case view access within administrative scope.
-   * - Caller must be an authorized officer (FIELD_OFFICER, LAND_OFFICER, or SUPER_ADMIN).
-   * - If assigning another investigator, caller must hold LAND_OFFICER or SUPER_ADMIN role.
-   * - The assigned investigator must be a valid officer.
+   * - Caller must be an authorized LAND_OFFICER.
+   * - Field Officer cannot conduct investigations.
+   * - If assigning another investigator, assigned investigator must also be a Land Officer within case scope.
    * - Discrepancy must NOT be in RESOLVED status.
    */
   async startInvestigation(
@@ -140,25 +261,22 @@ export class DiscrepancyService {
       );
     }
 
-    const isSuper = await permissionService.isSuperAdmin(userId);
     const callerRoles = await permissionService.getUserRoles(userId);
-
     const isLandOfficer = callerRoles.includes('LAND_OFFICER');
-    const isFieldOfficer = callerRoles.includes('FIELD_OFFICER');
 
-    if (!isSuper && !isLandOfficer && !isFieldOfficer) {
+    if (!isLandOfficer) {
       throw new ForbiddenError(
-        'Forbidden: Only an authorized Field Officer, Land Officer, or Super Admin may conduct or assign investigations'
+        'Forbidden: Only an authorized Land Officer may investigate discrepancies'
       );
     }
 
     let assignedInvestigatorId = userId;
 
     if (input.investigatorId && input.investigatorId !== userId) {
-      // Delegating/assigning to another investigator requires Land Officer or Super Admin authority
-      if (!isSuper && !isLandOfficer) {
-        throw new ForbiddenError(
-          'Forbidden: Only a Land Officer or Super Admin may assign an investigation to another officer'
+      const targetRoles = await permissionService.getUserRoles(input.investigatorId);
+      if (!targetRoles.includes('LAND_OFFICER')) {
+        throw new BadRequestError(
+          'The assigned investigator must be an authorized Land Officer'
         );
       }
 
@@ -338,12 +456,14 @@ export class DiscrepancyService {
   }
 
   /**
-   * Records an authorized resolution decision on a submitted discrepancy.
+   * Records a resolution decision on a submitted discrepancy.
    *
-   * Separation of duties:
-   * - Authorized decision-maker CANNOT be the investigator who conducted/submitted the investigation.
-   * - SUPER_ADMIN cannot bypass this separation of duties rule.
-   * - Caller must have Land Officer or ACQUISITION_CASE_REVIEW authority.
+   * Responsibility model:
+   * - Only the original FIELD_OFFICER who created the discrepancy may review findings and confirm closure or request further investigation.
+   * - Investigating Land Officer CANNOT approve, confirm, or close their own investigation.
+   * - Other Field Officers CANNOT perform the original reporter's closure actions.
+   * - Land Officers CANNOT close discrepancies.
+   * - SUPER_ADMIN does NOT bypass this workflow rule on ordinary endpoints.
    * - Discrepancy must be in SUBMITTED_FOR_RESOLUTION status.
    * - Requires mandatory remarks (minimum 5 characters).
    */
@@ -363,23 +483,6 @@ export class DiscrepancyService {
       );
     }
 
-    // Role/permission check: Land Officer, Project Officer (ACQUISITION_CASE_REVIEW), or Super Admin
-    const isSuper = await permissionService.isSuperAdmin(userId);
-    const callerRoles = await permissionService.getUserRoles(userId);
-    const userPermissions = await permissionService.getUserPermissions(userId);
-
-    const hasReviewAuthority =
-      isSuper ||
-      callerRoles.includes('LAND_OFFICER') ||
-      callerRoles.includes('PROJECT_OFFICER') ||
-      userPermissions.includes('ACQUISITION_CASE_REVIEW');
-
-    if (!hasReviewAuthority) {
-      throw new ForbiddenError(
-        'Forbidden: Only an authorized Land Officer, Project Officer, or Super Admin may resolve discrepancies'
-      );
-    }
-
     // Find the submitted investigation
     const submittedInvestigation = discrepancy.investigations.find(
       (i) => i.status === 'SUBMITTED'
@@ -390,14 +493,28 @@ export class DiscrepancyService {
       );
     }
 
-    // Separation of duties: Reviewer / decision-maker CANNOT be the investigator
-    // SUPER_ADMIN does NOT bypass this separation of duties rule
+    // Separation of duties: Investigator CANNOT approve, confirm, or close the discrepancy
     if (
       submittedInvestigation.investigatorId === userId ||
       submittedInvestigation.createdBy === userId
     ) {
       throw new ForbiddenError(
-        'Forbidden: The officer who investigated or submitted findings cannot resolve the discrepancy (separation of duties)'
+        'Forbidden: The investigating officer cannot review, confirm, or close their own investigation (separation of duties)'
+      );
+    }
+
+    // Role check: Only FIELD_OFFICER role may review findings and confirm closure or request further investigation
+    const callerRoles = await permissionService.getUserRoles(userId);
+    if (!callerRoles.includes('FIELD_OFFICER')) {
+      throw new ForbiddenError(
+        'Forbidden: Only the original Field Officer who reported this discrepancy may review findings and confirm closure or request further investigation'
+      );
+    }
+
+    // Creator check: Only the original Field Officer who created the discrepancy can confirm and close or request further investigation
+    if (discrepancy.createdBy !== userId) {
+      throw new ForbiddenError(
+        'Forbidden: Only the original Field Officer who created this discrepancy may review findings, confirm closure, or request further investigation'
       );
     }
 

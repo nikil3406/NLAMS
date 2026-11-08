@@ -40,7 +40,7 @@ export function FieldVerificationReviewModal({
 
   // State for Review Decision Form
   const [decision, setDecision] = useState<
-    'ACCEPTED' | 'RETURNED_FOR_CORRECTION' | 'DISCREPANCY_FLAGGED'
+    'ACCEPTED' | 'RETURNED_FOR_CORRECTION'
   >('ACCEPTED');
   const [remarks, setRemarks] = useState('');
   const [isConfirmed, setIsConfirmed] = useState(false);
@@ -59,12 +59,6 @@ export function FieldVerificationReviewModal({
     if (decision === 'RETURNED_FOR_CORRECTION' && trimmedRemarks.length < 5) {
       setErrorMessage(
         'Remarks are required when returning a report for correction (minimum 5 characters).'
-      );
-      return;
-    }
-    if (decision === 'DISCREPANCY_FLAGGED' && trimmedRemarks.length < 5) {
-      setErrorMessage(
-        'A reason or remarks explaining the discrepancy are mandatory when flagging a report (minimum 5 characters).'
       );
       return;
     }
@@ -827,37 +821,6 @@ export function FieldVerificationReviewModal({
                     </span>
                   </div>
                 </label>
-
-                <label
-                  style={{
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: '0.5rem',
-                    background: decision === 'DISCREPANCY_FLAGGED' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(0,0,0,0.2)',
-                    border: decision === 'DISCREPANCY_FLAGGED' ? '1px solid #ef4444' : '1px solid rgba(255,255,255,0.08)',
-                    borderRadius: '6px',
-                    padding: '0.75rem',
-                    cursor: 'pointer',
-                  }}
-                >
-                  <input
-                    type="radio"
-                    name="reviewDecision"
-                    value="DISCREPANCY_FLAGGED"
-                    checked={decision === 'DISCREPANCY_FLAGGED'}
-                    onChange={() => setDecision('DISCREPANCY_FLAGGED')}
-                    style={{ marginTop: '0.2rem' }}
-                    id="decision-radio-discrepancy"
-                  />
-                  <div>
-                    <strong style={{ color: '#f87171', fontSize: '0.8125rem', display: 'block' }}>
-                      ⚠️ Flag Discrepancy
-                    </strong>
-                    <span style={{ fontSize: '0.6875rem', color: '#94a3b8' }}>
-                      Ground discrepancy flagged; requires further investigation.
-                    </span>
-                  </div>
-                </label>
               </div>
 
               {/* Remarks Textarea */}
@@ -880,8 +843,6 @@ export function FieldVerificationReviewModal({
                   placeholder={
                     decision === 'RETURNED_FOR_CORRECTION'
                       ? 'Specify the exact items or measurements needing correction by the field officer...'
-                      : decision === 'DISCREPANCY_FLAGGED'
-                      ? 'Explain the discrepancy found between official records and field inspection...'
                       : 'Optional review notes or observations...'
                   }
                   className="form-input"

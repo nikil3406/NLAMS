@@ -70,3 +70,26 @@ export const resolveDiscrepancySchema = z.object({
 
 export type ResolveDiscrepancyInput = z.infer<typeof resolveDiscrepancySchema>;
 
+export const createDiscrepancyEvidenceSchema = z.object({
+  evidenceType: z.enum(FIELD_VERIFICATION_EVIDENCE_TYPES),
+  fileReference: z.string().min(1, 'File reference is required').max(255),
+  caption: z.string().max(255).optional().nullable(),
+  description: z.string().max(1000).optional().nullable(),
+});
+
+export const createDiscrepancySchema = z.object({
+  caseParcelId: z.string().uuid({ message: 'Valid case parcel ID is required' }),
+  category: z.enum(PARCEL_DISCREPANCY_CATEGORIES, {
+    required_error: 'Discrepancy category is required',
+  }),
+  description: z
+    .string({ required_error: 'Discrepancy description is required' })
+    .min(5, 'Discrepancy description must be at least 5 characters long')
+    .max(2000),
+  reportId: z.string().uuid().optional().nullable(),
+  evidence: z.array(createDiscrepancyEvidenceSchema).optional(),
+});
+
+export type CreateDiscrepancyInput = z.infer<typeof createDiscrepancySchema>;
+
+

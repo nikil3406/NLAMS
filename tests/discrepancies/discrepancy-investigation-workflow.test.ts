@@ -43,7 +43,10 @@ import { passwordService } from '../../src/services/auth/password.service';
 import { authConfig } from '../../src/config/auth';
 
 // Route Handlers
-import { GET as listDiscrepanciesHandler } from '../../src/app/api/acquisition-cases/[id]/discrepancies/route';
+import {
+  GET as listDiscrepanciesHandler,
+  POST as createDiscrepancyHandler,
+} from '../../src/app/api/acquisition-cases/[id]/discrepancies/route';
 import { GET as getDiscrepancyHandler } from '../../src/app/api/acquisition-cases/[id]/discrepancies/[discrepancyId]/route';
 import { POST as startInvestigationHandler } from '../../src/app/api/acquisition-cases/[id]/discrepancies/[discrepancyId]/investigations/route';
 import { PATCH as updateInvestigationHandler } from '../../src/app/api/acquisition-cases/[id]/discrepancies/[discrepancyId]/investigations/[investigationId]/route';
@@ -304,6 +307,7 @@ describe('NLAMS — Step 6: Discrepancy Investigation and Resolution Workflow', 
       await db.delete(userRoles).where(inArray(userRoles.userId, createdUserIds));
       await db.delete(users).where(inArray(users.id, createdUserIds));
     }
+    setTimeout(() => process.exit(0), 100);
   });
 
   function makeReq(
@@ -420,9 +424,49 @@ describe('NLAMS — Step 6: Discrepancy Investigation and Resolution Workflow', 
     assert.equal(disc.caseParcelId, caseParcel1Id);
     assert.equal(disc.status, 'OPEN');
     assert.equal(disc.description, 'Significant boundary conflict observed with survey records.');
-    assert.equal(disc.createdBy, landOfficer1Id);
+    assert.equal(disc.createdBy, fieldOfficerAuthorId);
 
     flaggedDiscrepancyId = disc.id;
+  });
+
+  it('3b. Field Officer creates and submits discrepancy directly via API', async () => {
+    const directReportId = await createAndSubmitReport('DISCREPANCY_FOUND');
+    const req = makeReq(
+      'POST',
+      `http://localhost:3000/api/acquisition-cases/${caseId}/discrepancies`,
+      fieldOfficerAuthorCookie,
+      {
+        caseParcelId: caseParcel1Id,
+        category: 'AREA_MISMATCH',
+        description: 'Physical ground measurement diverges significantly from cadastral map.',
+        reportId: directReportId,
+      }
+    );
+    const res = await createDiscrepancyHandler(req, {
+      params: Promise.resolve({ id: caseId }),
+    });
+    assert.equal(res.status, 201);
+    const json = await res.json();
+    assert.equal(json.data.category, 'AREA_MISMATCH');
+    assert.equal(json.data.createdBy, fieldOfficerAuthorId);
+    assert.equal(json.data.status, 'OPEN');
+  });
+
+  it('3c. Land Officer CANNOT create discrepancy directly (403 Forbidden)', async () => {
+    const req = makeReq(
+      'POST',
+      `http://localhost:3000/api/acquisition-cases/${caseId}/discrepancies`,
+      landOfficer1Cookie,
+      {
+        caseParcelId: caseParcel1Id,
+        category: 'OTHER',
+        description: 'Attempting Land Officer discrepancy creation.',
+      }
+    );
+    const res = await createDiscrepancyHandler(req, {
+      params: Promise.resolve({ id: caseId }),
+    });
+    assert.equal(res.status, 403);
   });
 
   it('4. Discrepancy retrieval via GET returns full details, parcel info, and triggering report', async () => {
@@ -448,11 +492,24 @@ describe('NLAMS — Step 6: Discrepancy Investigation and Resolution Workflow', 
 
   let investigationId: string;
 
-  it('5. Field Officer starts an investigation, transitioning discrepancy to UNDER_INVESTIGATION', async () => {
+  it('5a. Field Officer CANNOT start an investigation (403 Forbidden)', async () => {
     const req = makeReq(
       'POST',
       `http://localhost:3000/api/acquisition-cases/${caseId}/discrepancies/${flaggedDiscrepancyId}/investigations`,
-      fieldOfficerInvestigatorCookie,
+      fieldOfficerAuthorCookie,
+      { notes: 'Field officer attempting to investigate.' }
+    );
+    const res = await startInvestigationHandler(req, {
+      params: Promise.resolve({ id: caseId, discrepancyId: flaggedDiscrepancyId }),
+    });
+    assert.equal(res.status, 403, 'Field Officer must be forbidden from investigating');
+  });
+
+  it('5b. Land Officer starts an investigation, transitioning discrepancy to UNDER_INVESTIGATION', async () => {
+    const req = makeReq(
+      'POST',
+      `http://localhost:3000/api/acquisition-cases/${caseId}/discrepancies/${flaggedDiscrepancyId}/investigations`,
+      landOfficer1Cookie,
       { notes: 'Commencing boundary investigation and resurvey.' }
     );
     const res = await startInvestigationHandler(req, {
@@ -462,7 +519,7 @@ describe('NLAMS — Step 6: Discrepancy Investigation and Resolution Workflow', 
     const json = await res.json();
     assert.equal(json.data.discrepancy.status, 'UNDER_INVESTIGATION');
     assert.equal(json.data.investigation.status, 'DRAFT');
-    assert.equal(json.data.investigation.investigatorId, fieldOfficerInvestigatorId);
+    assert.equal(json.data.investigation.investigatorId, landOfficer1Id);
 
     investigationId = json.data.investigation.id;
   });
@@ -471,7 +528,7 @@ describe('NLAMS — Step 6: Discrepancy Investigation and Resolution Workflow', 
     const req = makeReq(
       'PATCH',
       `http://localhost:3000/api/acquisition-cases/${caseId}/discrepancies/${flaggedDiscrepancyId}/investigations/${investigationId}`,
-      fieldOfficerAuthorCookie, // Author is not the assigned investigator
+      landOfficer2Cookie, // Land Officer 2 is not the assigned investigator
       { findings: 'Attempt to tamper findings.' }
     );
     const res = await updateInvestigationHandler(req, {
@@ -484,7 +541,7 @@ describe('NLAMS — Step 6: Discrepancy Investigation and Resolution Workflow', 
     const req = makeReq(
       'PATCH',
       `http://localhost:3000/api/acquisition-cases/${caseId}/discrepancies/${flaggedDiscrepancyId}/investigations/${investigationId}`,
-      fieldOfficerInvestigatorCookie,
+      landOfficer1Cookie,
       {
         findings: 'On-site resurvey shows northern boundary marker displaced by 4.2 meters.',
         notes: 'GPS survey conducted using differential GNSS equipment.',
@@ -502,7 +559,7 @@ describe('NLAMS — Step 6: Discrepancy Investigation and Resolution Workflow', 
     const req = makeReq(
       'POST',
       `http://localhost:3000/api/acquisition-cases/${caseId}/discrepancies/${flaggedDiscrepancyId}/investigations/${investigationId}/evidence`,
-      fieldOfficerInvestigatorCookie,
+      landOfficer1Cookie,
       {
         evidenceType: 'SKETCH',
         fileReference: `inv_sketch_${ts}.pdf`,
@@ -521,7 +578,7 @@ describe('NLAMS — Step 6: Discrepancy Investigation and Resolution Workflow', 
     const req = makeReq(
       'POST',
       `http://localhost:3000/api/acquisition-cases/${caseId}/discrepancies/${flaggedDiscrepancyId}/investigations/${investigationId}/submit`,
-      fieldOfficerInvestigatorCookie,
+      landOfficer1Cookie,
       {
         findings: 'Final verified findings: Boundary discrepancy confirmed. The affected area is 650 sq m instead of proposed 800 sq m.',
       }
@@ -539,11 +596,11 @@ describe('NLAMS — Step 6: Discrepancy Investigation and Resolution Workflow', 
   // Category 4: Resolution & Separation of Duties
   // --------------------------------------------------------------------------
 
-  it('10. Separation of duties: Investigator CANNOT resolve their own investigation (403 Forbidden)', async () => {
+  it('10a. Separation of duties: Investigator Land Officer CANNOT resolve their own investigation (403 Forbidden)', async () => {
     const req = makeReq(
       'POST',
       `http://localhost:3000/api/acquisition-cases/${caseId}/discrepancies/${flaggedDiscrepancyId}/resolve`,
-      fieldOfficerInvestigatorCookie, // Investigator attempts self-approval
+      landOfficer1Cookie, // Investigator attempts self-approval
       {
         decision: 'RESOLVED',
         remarks: 'Self approval attempt.',
@@ -555,11 +612,43 @@ describe('NLAMS — Step 6: Discrepancy Investigation and Resolution Workflow', 
     assert.equal(res.status, 403, 'Investigator must be denied resolution privilege');
   });
 
+  it('10b. Other Land Officer CANNOT resolve or close discrepancy (403 Forbidden)', async () => {
+    const req = makeReq(
+      'POST',
+      `http://localhost:3000/api/acquisition-cases/${caseId}/discrepancies/${flaggedDiscrepancyId}/resolve`,
+      landOfficer2Cookie, // Non-investigator Land Officer attempts closure
+      {
+        decision: 'RESOLVED',
+        remarks: 'Land Officer attempting closure.',
+      }
+    );
+    const res = await resolveDiscrepancyHandler(req, {
+      params: Promise.resolve({ id: caseId, discrepancyId: flaggedDiscrepancyId }),
+    });
+    assert.equal(res.status, 403, 'Land Officer must be denied closure privilege');
+  });
+
+  it('10c. Another Field Officer CANNOT resolve discrepancy created by original reporter (403 Forbidden)', async () => {
+    const req = makeReq(
+      'POST',
+      `http://localhost:3000/api/acquisition-cases/${caseId}/discrepancies/${flaggedDiscrepancyId}/resolve`,
+      fieldOfficerInvestigatorCookie, // Different Field Officer
+      {
+        decision: 'RESOLVED',
+        remarks: 'Non-creator Field Officer attempting closure.',
+      }
+    );
+    const res = await resolveDiscrepancyHandler(req, {
+      params: Promise.resolve({ id: caseId, discrepancyId: flaggedDiscrepancyId }),
+    });
+    assert.equal(res.status, 403, 'Non-creator Field Officer must be denied closure privilege');
+  });
+
   it('11. Resolution requires mandatory remarks (min 5 characters)', async () => {
     const req = makeReq(
       'POST',
       `http://localhost:3000/api/acquisition-cases/${caseId}/discrepancies/${flaggedDiscrepancyId}/resolve`,
-      landOfficer1Cookie,
+      fieldOfficerAuthorCookie,
       {
         decision: 'RESOLVED',
         remarks: 'ok', // too short
@@ -575,7 +664,7 @@ describe('NLAMS — Step 6: Discrepancy Investigation and Resolution Workflow', 
     const req = makeReq(
       'POST',
       `http://localhost:3000/api/acquisition-cases/${caseId}/discrepancies/${flaggedDiscrepancyId}/resolve`,
-      landOfficer1Cookie,
+      fieldOfficerAuthorCookie, // Original Field Officer
       {
         decision: 'RETURNED_FOR_FURTHER_INVESTIGATION',
         remarks: 'Please obtain official village survey map certification from the revenue office.',
@@ -589,12 +678,12 @@ describe('NLAMS — Step 6: Discrepancy Investigation and Resolution Workflow', 
     assert.equal(json.data.status, 'UNDER_INVESTIGATION');
   });
 
-  it('13. Re-submitting investigation after return and resolving successfully', async () => {
-    // Start second investigation iteration
+  it('13. Re-submitting investigation after return and resolving successfully by original Field Officer', async () => {
+    // Land Officer 1 starts second investigation iteration
     const startReq = makeReq(
       'POST',
       `http://localhost:3000/api/acquisition-cases/${caseId}/discrepancies/${flaggedDiscrepancyId}/investigations`,
-      fieldOfficerInvestigatorCookie,
+      landOfficer1Cookie,
       { notes: 'Second iteration: Attaching revenue office certified village survey sheet.' }
     );
     const startRes = await startInvestigationHandler(startReq, {
@@ -604,11 +693,11 @@ describe('NLAMS — Step 6: Discrepancy Investigation and Resolution Workflow', 
     const startJson = await startRes.json();
     const inv2Id = startJson.data.investigation.id;
 
-    // Submit second investigation
+    // Land Officer 1 submits second investigation
     const subReq = makeReq(
       'POST',
       `http://localhost:3000/api/acquisition-cases/${caseId}/discrepancies/${flaggedDiscrepancyId}/investigations/${inv2Id}/submit`,
-      fieldOfficerInvestigatorCookie,
+      landOfficer1Cookie,
       {
         findings: 'Revenue office certified village survey map attached. Measurement reconciled with adjoining parcel owners.',
       }
@@ -618,14 +707,14 @@ describe('NLAMS — Step 6: Discrepancy Investigation and Resolution Workflow', 
     });
     assert.equal(subRes.status, 200);
 
-    // Land Officer 2 resolves the discrepancy
+    // Original Field Officer Author resolves and closes the discrepancy
     const resReq = makeReq(
       'POST',
       `http://localhost:3000/api/acquisition-cases/${caseId}/discrepancies/${flaggedDiscrepancyId}/resolve`,
-      landOfficer2Cookie,
+      fieldOfficerAuthorCookie,
       {
         decision: 'RESOLVED',
-        remarks: 'Discrepancy formally resolved based on official revenue survey map certification.',
+        remarks: 'Discrepancy formally confirmed and closed based on certified survey map findings.',
       }
     );
     const resRes = await resolveDiscrepancyHandler(resReq, {
@@ -647,10 +736,10 @@ describe('NLAMS — Step 6: Discrepancy Investigation and Resolution Workflow', 
     const req = makeReq(
       'POST',
       `http://localhost:3000/api/acquisition-cases/${caseId}/discrepancies/${flaggedDiscrepancyId}/resolve`,
-      landOfficer1Cookie,
+      fieldOfficerAuthorCookie,
       {
         decision: 'RESOLVED',
-        remarks: 'Redundant resolution attempt.',
+        remarks: 'Redundant resolution attempt by original Field Officer.',
       }
     );
     const res = await resolveDiscrepancyHandler(req, {
@@ -671,7 +760,7 @@ describe('NLAMS — Step 6: Discrepancy Investigation and Resolution Workflow', 
     assert.equal(res.status, 200);
     const json = await res.json();
     assert.ok(json.data.discrepanciesSummary, 'Case verification summary must include discrepanciesSummary');
-    assert.equal(json.data.discrepanciesSummary.totalDiscrepancies, 1);
+    assert.equal(json.data.discrepanciesSummary.totalDiscrepancies, 2);
     assert.equal(json.data.discrepanciesSummary.resolvedDiscrepancies, 1);
   });
 

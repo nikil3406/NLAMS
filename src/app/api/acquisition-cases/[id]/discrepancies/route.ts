@@ -2,7 +2,10 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { getCurrentUser } from '../../../../../lib/auth';
 import { handleApiError } from '../../../../../lib/api-response';
 import { discrepancyService } from '../../../../../services/discrepancies';
-import { listDiscrepanciesQuerySchema } from '../../../../../validators/discrepancies';
+import {
+  listDiscrepanciesQuerySchema,
+  createDiscrepancySchema,
+} from '../../../../../validators/discrepancies';
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -62,4 +65,59 @@ export async function GET(
     return handleApiError(error);
   }
 }
+
+/**
+ * POST /api/acquisition-cases/[id]/discrepancies
+ *
+ * Creates and submits a formal parcel discrepancy.
+ * Enforces:
+ * - Authenticated, active Field Officer.
+ * - Administrative scope for the acquisition case project.
+ * - Discrepancy creator is set to the calling Field Officer's immutable ID.
+ * - Status initialized to OPEN.
+ */
+export async function POST(
+  request: NextRequest,
+  context: RouteContext
+): Promise<NextResponse> {
+  try {
+    const user = await getCurrentUser(request);
+    if (!user) {
+      return NextResponse.json(
+        { success: false, error: 'Unauthorized' },
+        { status: 401 }
+      );
+    }
+
+    const { id: caseId } = await context.params;
+
+    let body: unknown = {};
+    try {
+      const text = await request.text();
+      if (text && text.trim().length > 0) {
+        body = JSON.parse(text);
+      }
+    } catch {
+      return NextResponse.json(
+        { success: false, error: 'Invalid JSON request body' },
+        { status: 400 }
+      );
+    }
+
+    const input = createDiscrepancySchema.parse(body);
+    const discrepancy = await discrepancyService.createDiscrepancy(
+      caseId,
+      input,
+      user.id
+    );
+
+    return NextResponse.json(
+      { success: true, data: discrepancy },
+      { status: 201 }
+    );
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
+
 
