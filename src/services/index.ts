@@ -8,4 +8,5 @@ export * from './acquisition-cases';
 export * from './parcels';
 export * from './field-verification-reports';
 export * from './discrepancies';
+export * from './verified-land-inventory';
 

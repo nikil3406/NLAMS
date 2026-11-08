@@ -19,3 +19,4 @@ export * from './field-verification-report-reviews';
 export * from './parcel-discrepancies';
 export * from './discrepancy-investigations';
 export * from './discrepancy-resolution-history';
+export * from './verified-land-inventories';
