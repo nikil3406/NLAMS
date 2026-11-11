@@ -181,6 +181,13 @@ export function InventoryDetailClient({
   const [isRevising, setIsRevising] = useState(false);
   const [reviseError, setReviseError] = useState<string | null>(null);
 
+  // Ministry Decision Modal
+  const [showDecisionModal, setShowDecisionModal] = useState(false);
+  const [decisionType, setDecisionType] = useState<'APPROVE' | 'REQUEST_CORRECTIONS' | 'REJECT' | null>(null);
+  const [decisionRemarks, setDecisionRemarks] = useState('');
+  const [isProcessingDecision, setIsProcessingDecision] = useState(false);
+  const [decisionError, setDecisionError] = useState<string | null>(null);
+
   // Fetch Inventory Details and Version History
   const loadDetails = useCallback(async () => {
     setIsLoading(true);
@@ -295,6 +302,48 @@ export function InventoryDetailClient({
       );
     } finally {
       setIsRevising(false);
+    }
+  };
+
+  // Handle Ministry Decision (Approve / Request Corrections / Reject)
+  const handleDecision = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inventory || !decisionType) return;
+    if (
+      (decisionType === 'REQUEST_CORRECTIONS' || decisionType === 'REJECT') &&
+      !decisionRemarks.trim()
+    ) {
+      setDecisionError('Remarks are required for this action.');
+      return;
+    }
+    setIsProcessingDecision(true);
+    setDecisionError(null);
+    try {
+      const res = await fetch(`/api/verified-land-inventories/${inventory.id}/decision`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          decision: decisionType,
+          remarks: decisionRemarks.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || 'Decision failed');
+      setShowDecisionModal(false);
+      setDecisionRemarks('');
+      setDecisionType(null);
+      const label =
+        decisionType === 'APPROVE'
+          ? 'approved'
+          : decisionType === 'REJECT'
+          ? 'rejected'
+          : 'returned for corrections';
+      setSuccessMessage(`Inventory ${label} successfully.`);
+      loadDetails();
+    } catch (err: unknown) {
+      setDecisionError(err instanceof Error ? err.message : 'Error processing decision');
+    } finally {
+      setIsProcessingDecision(false);
     }
   };
 
@@ -427,7 +476,83 @@ export function InventoryDetailClient({
             </button>
           )}
 
-          {isMinistryAdmin && (
+          {isMinistryAdmin && (inventory.status === 'SUBMITTED' || inventory.status === 'UNDER_REVIEW') && (
+            <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="btn-primary"
+                id="btn-approve-inventory"
+                onClick={() => {
+                  setDecisionType('APPROVE');
+                  setDecisionRemarks('');
+                  setDecisionError(null);
+                  setShowDecisionModal(true);
+                }}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                <span>Approve Inventory</span>
+              </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                id="btn-request-corrections"
+                style={{ borderColor: '#d97706', color: '#fbbf24' }}
+                onClick={() => {
+                  setDecisionType('REQUEST_CORRECTIONS');
+                  setDecisionRemarks('');
+                  setDecisionError(null);
+                  setShowDecisionModal(true);
+                }}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M1 4v6h6" />
+                  <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+                </svg>
+                <span>Request Corrections</span>
+              </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                id="btn-reject-inventory"
+                style={{ borderColor: '#dc2626', color: '#f87171' }}
+                onClick={() => {
+                  setDecisionType('REJECT');
+                  setDecisionRemarks('');
+                  setDecisionError(null);
+                  setShowDecisionModal(true);
+                }}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+                <span>Reject</span>
+              </button>
+            </div>
+          )}
+          {isMinistryAdmin && inventory.status === 'APPROVED' && (
+            <div
+              style={{
+                fontSize: '0.8125rem',
+                color: '#34d399',
+                padding: '0.5rem 0.75rem',
+                borderRadius: '6px',
+                background: 'rgba(16, 185, 129, 0.08)',
+                border: '1px solid rgba(16, 185, 129, 0.3)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+              }}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+              Approved — Eligible for Acquisition Proposal Preparation
+            </div>
+          )}
+          {isMinistryAdmin && !['SUBMITTED', 'UNDER_REVIEW', 'APPROVED'].includes(inventory.status) && (
             <div
               style={{
                 fontSize: '0.8125rem',
@@ -474,6 +599,37 @@ export function InventoryDetailClient({
           >
             ✕
           </button>
+        </div>
+      )}
+
+      {/* Approved Notice */}
+      {inventory.status === 'APPROVED' && (
+        <div
+          style={{
+            padding: '1rem',
+            borderRadius: '8px',
+            background: 'rgba(16, 185, 129, 0.08)',
+            border: '1px solid rgba(16, 185, 129, 0.3)',
+            marginBottom: '1.5rem',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '0.75rem',
+          }}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#34d399" strokeWidth="2" style={{ flexShrink: 0, marginTop: '0.1rem' }}>
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+            <polyline points="22 4 12 14.01 9 11.01" />
+          </svg>
+          <div>
+            <div style={{ fontWeight: 600, color: '#34d399', marginBottom: '0.25rem' }}>
+              Inventory Approved
+            </div>
+            <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', margin: 0 }}>
+              This inventory has been officially approved by the Ministry Administrator
+              {inventory.reviewer ? ` (${inventory.reviewer.name})` : ''}.
+              It is permanently immutable and is now eligible for acquisition proposal preparation.
+            </p>
+          </div>
         </div>
       )}
 
@@ -1184,6 +1340,168 @@ export function InventoryDetailClient({
                     </>
                   ) : (
                     <span>Confirm & Submit</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Ministry Decision Modal */}
+      {showDecisionModal && decisionType && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
+          <div className="modal-card" style={{ maxWidth: '520px', width: '100%' }}>
+            <div className="modal-header">
+              <h3 className="modal-title">
+                {decisionType === 'APPROVE'
+                  ? 'Approve Inventory'
+                  : decisionType === 'REQUEST_CORRECTIONS'
+                  ? 'Request Corrections'
+                  : 'Reject Inventory'}
+              </h3>
+              <button
+                type="button"
+                className="modal-close-btn"
+                onClick={() => !isProcessingDecision && setShowDecisionModal(false)}
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleDecision}>
+              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                {/* Summary */}
+                <div
+                  style={{
+                    padding: '0.75rem',
+                    borderRadius: '6px',
+                    background: 'rgba(255, 255, 255, 0.04)',
+                    border: '1px solid var(--border-color)',
+                    fontSize: '0.8125rem',
+                  }}
+                >
+                  <div style={{ color: 'var(--text-muted)', marginBottom: '0.25rem' }}>Inventory under review</div>
+                  <div style={{ fontWeight: 600 }}>
+                    {inventory.acquisitionCase.caseReference} — v{inventory.versionNumber}
+                  </div>
+                  <div style={{ color: 'var(--text-secondary)', marginTop: '0.15rem' }}>
+                    {inventory.totalParcelCount} parcels · {inventory.aggregateAffectedArea} {inventory.areaUnit} affected area
+                  </div>
+                </div>
+
+                {/* Warning specific to decision */}
+                {decisionType === 'APPROVE' && (
+                  <div
+                    style={{
+                      padding: '0.75rem',
+                      borderRadius: '6px',
+                      background: 'rgba(16, 185, 129, 0.08)',
+                      border: '1px solid rgba(16, 185, 129, 0.25)',
+                      fontSize: '0.8125rem',
+                      color: '#34d399',
+                    }}
+                  >
+                    <strong>Approval Notice:</strong> Approving this inventory makes it permanently
+                    immutable and marks it as eligible for acquisition proposal preparation.
+                  </div>
+                )}
+                {decisionType === 'REQUEST_CORRECTIONS' && (
+                  <div
+                    style={{
+                      padding: '0.75rem',
+                      borderRadius: '6px',
+                      background: 'rgba(245, 158, 11, 0.08)',
+                      border: '1px solid rgba(245, 158, 11, 0.25)',
+                      fontSize: '0.8125rem',
+                      color: '#fbbf24',
+                    }}
+                  >
+                    <strong>Notice:</strong> This will return the inventory to the Land Officer for revision.
+                    Your remarks must clearly explain what needs to be corrected.
+                  </div>
+                )}
+                {decisionType === 'REJECT' && (
+                  <div
+                    style={{
+                      padding: '0.75rem',
+                      borderRadius: '6px',
+                      background: 'rgba(239, 68, 68, 0.08)',
+                      border: '1px solid rgba(239, 68, 68, 0.25)',
+                      fontSize: '0.8125rem',
+                      color: '#f87171',
+                    }}
+                  >
+                    <strong>Warning:</strong> Rejecting this inventory is a final administrative decision.
+                    Mandatory remarks must justify the rejection.
+                  </div>
+                )}
+
+                {decisionError && (
+                  <div className="alert-banner-error" style={{ fontSize: '0.8125rem' }}>
+                    <span>{decisionError}</span>
+                  </div>
+                )}
+
+                <div>
+                  <label
+                    htmlFor="decision-remarks"
+                    style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, marginBottom: '0.35rem' }}
+                  >
+                    {decisionType === 'APPROVE'
+                      ? 'Approval Remarks (Optional)'
+                      : <>Remarks <span style={{ color: '#f87171' }}>*</span> (Required)</>}
+                  </label>
+                  <textarea
+                    id="decision-remarks"
+                    required={decisionType !== 'APPROVE'}
+                    rows={4}
+                    value={decisionRemarks}
+                    onChange={(e) => setDecisionRemarks(e.target.value)}
+                    className="search-input"
+                    style={{ width: '100%', resize: 'vertical' }}
+                    placeholder={
+                      decisionType === 'APPROVE'
+                        ? 'Optional approval notes or observations...'
+                        : 'Required: explain clearly the reason for this decision...'
+                    }
+                  />
+                </div>
+              </div>
+
+              <div className="modal-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+                <button
+                  type="button"
+                  className="btn-cancel"
+                  disabled={isProcessingDecision}
+                  onClick={() => setShowDecisionModal(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  disabled={isProcessingDecision}
+                  id="btn-confirm-decision"
+                  style={
+                    decisionType === 'REJECT'
+                      ? { background: '#dc2626', borderColor: '#b91c1c' }
+                      : decisionType === 'REQUEST_CORRECTIONS'
+                      ? { background: '#d97706', borderColor: '#b45309' }
+                      : {}
+                  }
+                >
+                  {isProcessingDecision ? (
+                    <>
+                      <span className="spinner-sm" />
+                      <span>Processing...</span>
+                    </>
+                  ) : decisionType === 'APPROVE' ? (
+                    'Confirm Approval'
+                  ) : decisionType === 'REQUEST_CORRECTIONS' ? (
+                    'Send Correction Request'
+                  ) : (
+                    'Confirm Rejection'
                   )}
                 </button>
               </div>

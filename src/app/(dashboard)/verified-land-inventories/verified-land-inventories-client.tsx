@@ -124,6 +124,12 @@ export function VerifiedLandInventoriesClient({
   const router = useRouter();
 
   const isLandOfficer = userRoles.includes('LAND_OFFICER');
+  const isMinistryAdmin = userRoles.includes('MINISTRY_ADMIN');
+
+  // If Ministry Admin, default to 'queue' view, else 'all'
+  const [viewMode, setViewMode] = useState<'queue' | 'all'>(
+    isMinistryAdmin ? 'queue' : 'all'
+  );
 
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [summary, setSummary] = useState<SummaryMetrics>({
@@ -139,7 +145,9 @@ export function VerifiedLandInventoriesClient({
   const [totalPages, setTotalPages] = useState(1);
 
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState(
+    isMinistryAdmin ? 'PENDING_REVIEW' : ''
+  );
 
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -212,8 +220,19 @@ export function VerifiedLandInventoriesClient({
 
   const handleResetFilters = () => {
     setSearchTerm('');
-    setStatusFilter('');
+    setStatusFilter(viewMode === 'queue' ? 'PENDING_REVIEW' : '');
     setPage(1);
+  };
+
+  const handleTabChange = (mode: 'queue' | 'all') => {
+    setViewMode(mode);
+    setSearchTerm('');
+    setPage(1);
+    if (mode === 'queue') {
+      setStatusFilter('PENDING_REVIEW');
+    } else {
+      setStatusFilter('');
+    }
   };
 
   // Open Generate Modal and fetch eligible cases
@@ -371,6 +390,28 @@ export function VerifiedLandInventoriesClient({
             style={{ background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '1rem' }}
           >
             ✕
+          </button>
+        </div>
+      )}
+
+      {/* Ministry Review / All Inventories Tab Switcher */}
+      {isMinistryAdmin && (
+        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem' }}>
+          <button
+            type="button"
+            onClick={() => handleTabChange('queue')}
+            className={viewMode === 'queue' ? 'btn-primary' : 'btn-secondary'}
+            id="tab-ministry-queue"
+          >
+            Ministry Review Queue{summary.pendingReview > 0 ? ` (${summary.pendingReview})` : ''}
+          </button>
+          <button
+            type="button"
+            onClick={() => handleTabChange('all')}
+            className={viewMode === 'all' ? 'btn-primary' : 'btn-secondary'}
+            id="tab-all-inventories"
+          >
+            All Inventories
           </button>
         </div>
       )}
@@ -576,7 +617,7 @@ export function VerifiedLandInventoriesClient({
                 <th>Parcels</th>
                 <th>Affected Area</th>
                 <th>Created By</th>
-                <th>Generated Date</th>
+                <th>{isMinistryAdmin && viewMode === 'queue' ? 'Submission Date' : 'Generated Date'}</th>
                 <th>Status</th>
                 <th style={{ textAlign: 'right' }}>Actions</th>
               </tr>
@@ -642,7 +683,9 @@ export function VerifiedLandInventoriesClient({
                     </td>
                     <td>
                       <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
-                        {new Date(inv.generatedAt).toLocaleDateString()}
+                        {isMinistryAdmin && viewMode === 'queue' && inv.submittedAt
+                          ? new Date(inv.submittedAt).toLocaleDateString()
+                          : new Date(inv.generatedAt).toLocaleDateString()}
                       </div>
                     </td>
                     <td>
@@ -667,6 +710,17 @@ export function VerifiedLandInventoriesClient({
                         >
                           View
                         </Link>
+                        {isMinistryAdmin && (inv.status === 'SUBMITTED' || inv.status === 'UNDER_REVIEW') && (
+                          <Link
+                            href={`/verified-land-inventories/${inv.id}`}
+                            className="btn-primary"
+                            style={{ padding: '0.35rem 0.65rem', fontSize: '0.75rem' }}
+                            title="Open Ministry Review"
+                            id={`btn-review-${inv.id}`}
+                          >
+                            Review
+                          </Link>
+                        )}
                         {isLandOfficer && inv.status === 'DRAFT' && (
                           <button
                             type="button"
