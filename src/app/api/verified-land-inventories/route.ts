@@ -6,11 +6,8 @@ import { verifiedLandInventoryService } from '../../../services/verified-land-in
 /**
  * GET /api/verified-land-inventories
  *
- * Lists submitted verified land inventories awaiting review for authorized Ministry users.
- * Enforces:
- * - Active verified MINISTRY_ADMIN authority.
- * - Scoped to user's authorized administrative units.
- * - Returns only SUBMITTED and UNDER_REVIEW inventories.
+ * Lists submitted verified land inventories awaiting review for authorized Ministry users,
+ * or lists scoped inventories with pagination & summary when query parameters (e.g. view=all, page, search) are provided.
  */
 export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
@@ -22,6 +19,41 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       );
     }
 
+    const { searchParams } = new URL(request.url);
+
+    // If dashboard/list parameters are supplied, return scoped dashboard view
+    if (
+      searchParams.get('all') === 'true' ||
+      searchParams.get('view') === 'all' ||
+      searchParams.has('page') ||
+      searchParams.has('search')
+    ) {
+      const page = searchParams.get('page')
+        ? parseInt(searchParams.get('page')!, 10)
+        : 1;
+      const limit = searchParams.get('limit')
+        ? parseInt(searchParams.get('limit')!, 10)
+        : 10;
+      const status = searchParams.get('status') || undefined;
+      const search = searchParams.get('search') || undefined;
+
+      const result = await verifiedLandInventoryService.listDashboardInventories(
+        user.id,
+        { page, limit, status, search }
+      );
+
+      return NextResponse.json(
+        {
+          success: true,
+          data: result.items,
+          pagination: result.pagination,
+          summary: result.summary,
+        },
+        { status: 200 }
+      );
+    }
+
+    // Default: List submitted inventories for authorized Ministry users
     const items = await verifiedLandInventoryService.listSubmittedInventories(
       user.id
     );
@@ -34,4 +66,3 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return handleApiError(error);
   }
 }
-

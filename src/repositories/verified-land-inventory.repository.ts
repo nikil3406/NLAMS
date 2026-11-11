@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm';
 import { db } from '../../db';
 import {
   verifiedLandInventories,
@@ -465,6 +465,225 @@ export class VerifiedLandInventoryRepository {
       },
     }));
   }
+
+  /**
+   * Retrieves summary metric counts across all inventories in the authorized scope.
+   */
+  async getInventorySummaryMetrics(
+    scopedUnitIds?: string[],
+    txClient?: TransactionClient
+  ): Promise<InventorySummaryMetrics> {
+    const executor = (txClient ?? db) as typeof db;
+    const conditions = [];
+    if (scopedUnitIds && scopedUnitIds.length > 0) {
+      conditions.push(inArray(projects.administrativeUnitId, scopedUnitIds));
+    }
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    let query = executor
+      .select({
+        status: verifiedLandInventories.status,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(verifiedLandInventories)
+      .innerJoin(acquisitionCases, eq(verifiedLandInventories.caseId, acquisitionCases.id))
+      .innerJoin(projects, eq(acquisitionCases.projectId, projects.id))
+      .groupBy(verifiedLandInventories.status)
+      .$dynamic();
+
+    if (whereClause) {
+      query = query.where(whereClause);
+    }
+
+    const rows = await query;
+    let total = 0;
+    let draft = 0;
+    let pendingReview = 0;
+    let approved = 0;
+    let correctionRequested = 0;
+
+    for (const r of rows) {
+      const cnt = Number(r.count || 0);
+      total += cnt;
+      if (r.status === 'DRAFT') {
+        draft += cnt;
+      } else if (r.status === 'SUBMITTED' || r.status === 'UNDER_REVIEW') {
+        pendingReview += cnt;
+      } else if (r.status === 'APPROVED') {
+        approved += cnt;
+      } else if (r.status === 'CORRECTION_REQUESTED') {
+        correctionRequested += cnt;
+      }
+    }
+
+    return { total, draft, pendingReview, approved, correctionRequested };
+  }
+
+  /**
+   * Lists inventories with filtering by status, search term, and pagination for dashboard.
+   */
+  async listInventories(
+    options: InventoryListFilterOptions,
+    txClient?: TransactionClient
+  ): Promise<{
+    items: {
+      inventory: VerifiedLandInventory;
+      preparer: { id: string; name: string; email: string };
+      acquisitionCase: {
+        id: string;
+        caseReference: string;
+        title: string;
+        status: string;
+        projectId: string;
+        project: {
+          id: string;
+          projectCode: string;
+          name: string;
+          administrativeUnitId: string;
+          administrativeUnit: {
+            id: string;
+            name: string;
+            code: string;
+          };
+        };
+      };
+    }[];
+    total: number;
+  }> {
+    const executor = (txClient ?? db) as typeof db;
+    const conditions = [];
+
+    if (options.scopedUnitIds && options.scopedUnitIds.length > 0) {
+      conditions.push(inArray(projects.administrativeUnitId, options.scopedUnitIds));
+    }
+
+    if (options.status) {
+      const st = options.status.toUpperCase();
+      if (st === 'PENDING_REVIEW') {
+        conditions.push(inArray(verifiedLandInventories.status, ['SUBMITTED', 'UNDER_REVIEW']));
+      } else {
+        conditions.push(eq(verifiedLandInventories.status, st));
+      }
+    }
+
+    if (options.search?.trim()) {
+      const term = `%${options.search.trim()}%`;
+      conditions.push(
+        or(
+          ilike(acquisitionCases.caseReference, term),
+          ilike(acquisitionCases.title, term),
+          ilike(projects.name, term),
+          ilike(projects.projectCode, term),
+          ilike(sql`${verifiedLandInventories.id}::text`, term)
+        )
+      );
+    }
+
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    // Count query
+    let countQuery = executor
+      .select({ count: sql<number>`count(*)::int` })
+      .from(verifiedLandInventories)
+      .innerJoin(acquisitionCases, eq(verifiedLandInventories.caseId, acquisitionCases.id))
+      .innerJoin(projects, eq(acquisitionCases.projectId, projects.id))
+      .$dynamic();
+
+    if (whereClause) {
+      countQuery = countQuery.where(whereClause);
+    }
+
+    const [countRow] = await countQuery;
+    const total = Number(countRow?.count || 0);
+
+    // Data query
+    let query = executor
+      .select({
+        inventory: verifiedLandInventories,
+        preparer: {
+          id: users.id,
+          name: users.name,
+          email: users.email,
+        },
+        caseId: acquisitionCases.id,
+        caseReference: acquisitionCases.caseReference,
+        caseTitle: acquisitionCases.title,
+        caseStatus: acquisitionCases.status,
+        projectId: acquisitionCases.projectId,
+        projectCode: projects.projectCode,
+        projectName: projects.name,
+        administrativeUnitId: projects.administrativeUnitId,
+        adminUnitId: administrativeUnits.id,
+        adminUnitName: administrativeUnits.name,
+        adminUnitCode: administrativeUnits.code,
+      })
+      .from(verifiedLandInventories)
+      .innerJoin(users, eq(verifiedLandInventories.preparedBy, users.id))
+      .innerJoin(acquisitionCases, eq(verifiedLandInventories.caseId, acquisitionCases.id))
+      .innerJoin(projects, eq(acquisitionCases.projectId, projects.id))
+      .innerJoin(
+        administrativeUnits,
+        eq(projects.administrativeUnitId, administrativeUnits.id)
+      )
+      .orderBy(desc(verifiedLandInventories.updatedAt))
+      .$dynamic();
+
+    if (whereClause) {
+      query = query.where(whereClause);
+    }
+
+    if (typeof options.limit === 'number') {
+      query = query.limit(options.limit);
+    }
+
+    if (typeof options.offset === 'number') {
+      query = query.offset(options.offset);
+    }
+
+    const rows = await query;
+
+    return {
+      items: rows.map((r) => ({
+        inventory: r.inventory,
+        preparer: r.preparer,
+        acquisitionCase: {
+          id: r.caseId,
+          caseReference: r.caseReference,
+          title: r.caseTitle,
+          status: r.caseStatus,
+          projectId: r.projectId,
+          project: {
+            id: r.projectId,
+            projectCode: r.projectCode,
+            name: r.projectName,
+            administrativeUnitId: r.administrativeUnitId,
+            administrativeUnit: {
+              id: r.adminUnitId,
+              name: r.adminUnitName,
+              code: r.adminUnitCode,
+            },
+          },
+        },
+      })),
+      total,
+    };
+  }
+}
+
+export interface InventoryListFilterOptions {
+  scopedUnitIds?: string[];
+  status?: string;
+  search?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface InventorySummaryMetrics {
+  total: number;
+  draft: number;
+  pendingReview: number;
+  approved: number;
+  correctionRequested: number;
 }
 
 export const verifiedLandInventoryRepository = new VerifiedLandInventoryRepository();

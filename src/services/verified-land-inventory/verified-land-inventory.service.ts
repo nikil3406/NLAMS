@@ -928,6 +928,90 @@ export class VerifiedLandInventoryService {
 
     return verifiedLandInventoryRepository.listSubmittedInventories(scopedUnitIds);
   }
+
+  /**
+   * Lists inventories for dashboard display with scoped metrics, search, and pagination.
+   */
+  async listDashboardInventories(
+    userId: string,
+    options: {
+      page?: number;
+      limit?: number;
+      status?: string;
+      search?: string;
+    }
+  ) {
+    const user = await userRepository.findUserById(userId);
+    if (!user) {
+      throw new ForbiddenError('Forbidden: User not found');
+    }
+    if (user.status !== 'ACTIVE') {
+      throw new ForbiddenError(
+        `Forbidden: User account status is '${user.status}'.`
+      );
+    }
+
+    const isSuper = await permissionService.isSuperAdmin(userId);
+    let scopedUnitIds: string[] | undefined;
+
+    if (!isSuper) {
+      const assignedUnits = await scopeService.getUserAssignedUnits(userId);
+      if (assignedUnits.length === 0) {
+        return {
+          items: [],
+          pagination: {
+            page: options.page || 1,
+            limit: options.limit || 10,
+            total: 0,
+            totalPages: 1,
+          },
+          summary: {
+            total: 0,
+            draft: 0,
+            pendingReview: 0,
+            approved: 0,
+            correctionRequested: 0,
+          },
+        };
+      }
+      const unitIdSet = new Set<string>();
+      for (const u of assignedUnits) {
+        const descendants = await scopeService.getDescendantUnitIds(u.id);
+        for (const d of descendants) {
+          unitIdSet.add(d);
+        }
+      }
+      scopedUnitIds = Array.from(unitIdSet);
+    }
+
+    const page = Math.max(1, options.page || 1);
+    const limit = Math.min(100, Math.max(1, options.limit || 10));
+    const offset = (page - 1) * limit;
+
+    const [summary, listResult] = await Promise.all([
+      verifiedLandInventoryRepository.getInventorySummaryMetrics(scopedUnitIds),
+      verifiedLandInventoryRepository.listInventories({
+        scopedUnitIds,
+        status: options.status,
+        search: options.search,
+        limit,
+        offset,
+      }),
+    ]);
+
+    const totalPages = Math.max(1, Math.ceil(listResult.total / limit));
+
+    return {
+      items: listResult.items,
+      pagination: {
+        page,
+        limit,
+        total: listResult.total,
+        totalPages,
+      },
+      summary,
+    };
+  }
 }
 
 export const verifiedLandInventoryService = new VerifiedLandInventoryService();
