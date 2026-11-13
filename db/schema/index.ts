@@ -20,3 +20,4 @@ export * from './parcel-discrepancies';
 export * from './discrepancy-investigations';
 export * from './discrepancy-resolution-history';
 export * from './verified-land-inventories';
+export * from './acquisition-proposals';

@@ -105,6 +105,12 @@ async function verify() {
     'parcel_discrepancies',
     'discrepancy_investigations',
     'discrepancy_resolution_history',
+    'verified_land_inventories',
+    'inventory_parcel_snapshots',
+    'verified_land_inventory_workflow_history',
+    'acquisition_proposals',
+    'acquisition_proposal_versions',
+    'acquisition_proposal_workflow_history',
   ];
 
   console.log('\n  Tables:');

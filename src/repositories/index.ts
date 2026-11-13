@@ -10,3 +10,4 @@ export * from './acquisition-case.repository';
 export * from './parcel.repository';
 export * from './field-verification-report.repository';
 export * from './verified-land-inventory.repository';
+export * from './acquisition-proposal.repository';
