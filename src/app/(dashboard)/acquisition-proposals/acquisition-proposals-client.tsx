@@ -34,6 +34,12 @@ const STATUS_BADGE_STYLES: Record<
     border: 'rgba(245, 158, 11, 0.3)',
     label: 'Under Review',
   },
+  CORRECTION_REQUESTED: {
+    bg: 'rgba(234, 88, 12, 0.12)',
+    color: '#fb923c',
+    border: 'rgba(234, 88, 12, 0.3)',
+    label: 'Correction Requested',
+  },
   APPROVED: {
     bg: 'rgba(16, 185, 129, 0.18)',
     color: '#10b981',
@@ -288,6 +294,7 @@ export function AcquisitionProposalsClient({
             <option value="DRAFT">Draft</option>
             <option value="SUBMITTED">Submitted</option>
             <option value="UNDER_REVIEW">Under Review</option>
+            <option value="CORRECTION_REQUESTED">Correction Requested</option>
             <option value="APPROVED">Approved</option>
             <option value="REJECTED">Rejected</option>
           </select>
@@ -368,10 +375,13 @@ export function AcquisitionProposalsClient({
                   Current Version
                 </th>
                 <th style={{ padding: '0.75rem 1rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                  Versions
+                </th>
+                <th style={{ padding: '0.75rem 1rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
                   Status
                 </th>
                 <th style={{ padding: '0.75rem 1rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
-                  Created Date
+                  Last Updated
                 </th>
                 <th style={{ padding: '0.75rem 1rem', color: 'var(--text-secondary)', fontWeight: 600, textAlign: 'right' }}>
                   Actions
@@ -381,13 +391,13 @@ export function AcquisitionProposalsClient({
             <tbody>
               {isLoading ? (
                 <tr>
-                  <td colSpan={7} style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                  <td colSpan={8} style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
                     Loading acquisition proposals...
                   </td>
                 </tr>
               ) : proposals.length === 0 ? (
                 <tr>
-                  <td colSpan={7} style={{ padding: '3rem', textAlign: 'center' }}>
+                  <td colSpan={8} style={{ padding: '3rem', textAlign: 'center' }}>
                     <div style={{ color: 'var(--text-muted)', marginBottom: '0.5rem' }}>
                       No acquisition proposals found.
                     </div>
@@ -478,6 +488,17 @@ export function AcquisitionProposalsClient({
                       <td style={{ padding: '0.875rem 1rem' }}>
                         <span
                           style={{
+                            fontSize: '0.75rem',
+                            color: 'var(--text-secondary)',
+                            fontWeight: 500,
+                          }}
+                        >
+                          {p.versionCount ?? 1} version{(p.versionCount ?? 1) === 1 ? '' : 's'}
+                        </span>
+                      </td>
+                      <td style={{ padding: '0.875rem 1rem' }}>
+                        <span
+                          style={{
                             display: 'inline-flex',
                             alignItems: 'center',
                             padding: '0.2rem 0.55rem',
@@ -496,10 +517,10 @@ export function AcquisitionProposalsClient({
                       </td>
                       <td style={{ padding: '0.875rem 1rem', whiteSpace: 'nowrap' }}>
                         <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
-                          {new Date(p.createdAt).toLocaleDateString()}
+                          {new Date(p.updatedAt).toLocaleDateString()}
                         </div>
                         <div style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', marginTop: '0.125rem' }}>
-                          by {p.creator.name}
+                          Created: {new Date(p.createdAt).toLocaleDateString()}
                         </div>
                       </td>
                       <td style={{ padding: '0.875rem 1rem', textAlign: 'right', whiteSpace: 'nowrap' }}>

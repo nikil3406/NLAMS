@@ -55,6 +55,13 @@ export function EditProposalClient({
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
+  // Competent Authority Selection State
+  const [eligibleAuthorities, setEligibleAuthorities] = useState<any[]>([]);
+  const [selectedAuthorityId, setSelectedAuthorityId] = useState('');
+  const [isLoadingAuthorities, setIsLoadingAuthorities] = useState(false);
+  const [authoritiesNotice, setAuthoritiesNotice] = useState<string | null>(null);
+  const [isMultiDistrict, setIsMultiDistrict] = useState(false);
+
   useEffect(() => {
     async function loadProposal() {
       setIsLoading(true);
@@ -96,6 +103,24 @@ export function EditProposalClient({
                 }))
               );
             }
+            if (p.currentVersion?.selectedAuthorityId || p.selectedAuthority?.id) {
+              setSelectedAuthorityId(p.currentVersion?.selectedAuthorityId || p.selectedAuthority?.id || '');
+            }
+          }
+
+          // Load eligible authorities for this proposal
+          try {
+            const authRes = await fetch(`/api/acquisition-proposals/${proposalId}/eligible-authorities`);
+            if (authRes.ok) {
+              const authJson = await authRes.json();
+              if (authJson.success) {
+                setEligibleAuthorities(authJson.data || []);
+                setAuthoritiesNotice(authJson.notice || null);
+                setIsMultiDistrict(!!authJson.isMultiDistrict);
+              }
+            }
+          } catch (err) {
+            console.error('Error fetching eligible authorities:', err);
           }
         } else {
           throw new Error(json.error || 'Failed to load proposal.');
@@ -160,6 +185,7 @@ export function EditProposalClient({
     setIsSaving(true);
     try {
       const payload = {
+        competentAuthorityId: selectedAuthorityId ? selectedAuthorityId : null,
         acquisitionJustification: acquisitionJustification.trim(),
         publicPurpose: publicPurpose.trim(),
         legalFramework: legalFramework.trim(),
@@ -423,6 +449,94 @@ export function EditProposalClient({
                 {proposal.linkedInventory.totalParcelCount} parcels ({proposal.linkedInventory.aggregateAffectedArea} {proposal.linkedInventory.areaUnit})
               </span>
             </div>
+          </div>
+        </div>
+
+        {/* SECTION: Competent Authority Selection */}
+        <div
+          className="card"
+          style={{
+            padding: '1.5rem',
+            marginBottom: '1.5rem',
+            backgroundColor: 'var(--bg-secondary)',
+            borderRadius: '0.5rem',
+            border: '1px solid var(--border-color)',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+            <h2 style={{ fontSize: '1.125rem', fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>
+              Competent Authority Selection
+            </h2>
+            {isMultiDistrict && (
+              <span
+                style={{
+                  fontSize: '0.75rem',
+                  padding: '0.2rem 0.5rem',
+                  borderRadius: '0.25rem',
+                  backgroundColor: 'rgba(245, 158, 11, 0.15)',
+                  color: '#fbbf24',
+                  border: '1px solid rgba(245, 158, 11, 0.3)',
+                  fontWeight: 600,
+                }}
+              >
+                Multi-District Case (Option A Higher Authority)
+              </span>
+            )}
+          </div>
+          <p style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+            Designate the Competent Authority with jurisdiction over affected parcels in the approved inventory.
+          </p>
+
+          {authoritiesNotice && (
+            <div
+              style={{
+                padding: '0.75rem 1rem',
+                borderRadius: '0.375rem',
+                backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                border: '1px solid rgba(245, 158, 11, 0.3)',
+                color: '#fbbf24',
+                fontSize: '0.8125rem',
+                marginBottom: '1rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+              }}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+              <span>{authoritiesNotice}</span>
+            </div>
+          )}
+
+          <div style={{ marginBottom: '0.5rem' }}>
+            <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, marginBottom: '0.375rem', color: 'var(--text-secondary)' }}>
+              Assigned Competent Authority
+            </label>
+            <select
+              className="form-select"
+              value={selectedAuthorityId}
+              onChange={(e) => setSelectedAuthorityId(e.target.value)}
+              disabled={isLoadingAuthorities}
+              style={{
+                width: '100%',
+                padding: '0.55rem 0.75rem',
+                borderRadius: '0.375rem',
+                border: '1px solid var(--border-color)',
+                backgroundColor: 'var(--bg-primary)',
+                color: 'var(--text-primary)',
+                fontSize: '0.875rem',
+              }}
+            >
+              <option value="">-- No Competent Authority Selected --</option>
+              {eligibleAuthorities.map((auth) => (
+                <option key={auth.id} value={auth.id}>
+                  {auth.authorityName} ({auth.designation}) — {auth.authorityLevel} [{auth.authorityCode}]
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 

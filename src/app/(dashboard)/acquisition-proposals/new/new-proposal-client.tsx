@@ -82,6 +82,13 @@ export function NewProposalClient({}: NewProposalClientProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // Competent Authority Selection State
+  const [eligibleAuthorities, setEligibleAuthorities] = useState<any[]>([]);
+  const [selectedAuthorityId, setSelectedAuthorityId] = useState('');
+  const [isLoadingAuthorities, setIsLoadingAuthorities] = useState(false);
+  const [authoritiesNotice, setAuthoritiesNotice] = useState<string | null>(null);
+  const [isMultiDistrict, setIsMultiDistrict] = useState(false);
+
   // Load eligible cases
   useEffect(() => {
     async function loadEligible() {
@@ -116,7 +123,7 @@ export function NewProposalClient({}: NewProposalClientProps) {
     loadEligible();
   }, []);
 
-  // Update selected inventory when selected case changes
+  // Update selected inventory and load eligible authorities when selected case changes
   const handleCaseChange = (caseId: string) => {
     setSelectedCaseId(caseId);
     const foundCase = eligibleCases.find((c) => c.id === caseId);
@@ -126,6 +133,42 @@ export function NewProposalClient({}: NewProposalClientProps) {
       setSelectedInventoryId('');
     }
   };
+
+  // Load eligible Competent Authorities when selectedCaseId changes
+  useEffect(() => {
+    if (!selectedCaseId) {
+      setEligibleAuthorities([]);
+      setSelectedAuthorityId('');
+      setAuthoritiesNotice(null);
+      setIsMultiDistrict(false);
+      return;
+    }
+
+    async function loadAuthorities() {
+      setIsLoadingAuthorities(true);
+      try {
+        const res = await fetch(`/api/competent-authorities/eligible?caseId=${selectedCaseId}`);
+        if (!res.ok) throw new Error('Failed to load eligible authorities');
+        const json = await res.json();
+        if (json.success) {
+          setEligibleAuthorities(json.data || []);
+          setAuthoritiesNotice(json.notice || null);
+          setIsMultiDistrict(!!json.isMultiDistrict);
+          if (json.data && json.data.length > 0) {
+            setSelectedAuthorityId(json.data[0].id);
+          } else {
+            setSelectedAuthorityId('');
+          }
+        }
+      } catch (err) {
+        console.error('Error loading eligible authorities:', err);
+      } finally {
+        setIsLoadingAuthorities(false);
+      }
+    }
+
+    loadAuthorities();
+  }, [selectedCaseId]);
 
   const selectedCase = eligibleCases.find((c) => c.id === selectedCaseId);
   const selectedInventory = selectedCase?.approvedInventories.find(
@@ -193,6 +236,7 @@ export function NewProposalClient({}: NewProposalClientProps) {
       const payload = {
         acquisitionCaseId: selectedCaseId,
         linkedInventoryId: selectedInventoryId,
+        competentAuthorityId: selectedAuthorityId || undefined,
         acquisitionJustification: acquisitionJustification.trim(),
         publicPurpose: publicPurpose.trim(),
         legalFramework: legalFramework.trim(),
@@ -561,7 +605,100 @@ export function NewProposalClient({}: NewProposalClientProps) {
           )}
         </div>
 
-        {/* SECTION 3 & 4: Acquisition Justification & Public Purpose */}
+        {/* SECTION 3: Competent Authority Selection */}
+        <div
+          className="card"
+          style={{
+            padding: '1.5rem',
+            marginBottom: '1.5rem',
+            backgroundColor: 'var(--bg-secondary)',
+            borderRadius: '0.5rem',
+            border: '1px solid var(--border-color)',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+            <h2 style={{ fontSize: '1.125rem', fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>
+              3. Competent Authority Selection
+            </h2>
+            {isMultiDistrict && (
+              <span
+                style={{
+                  fontSize: '0.75rem',
+                  padding: '0.2rem 0.5rem',
+                  borderRadius: '0.25rem',
+                  backgroundColor: 'rgba(245, 158, 11, 0.15)',
+                  color: '#fbbf24',
+                  border: '1px solid rgba(245, 158, 11, 0.3)',
+                  fontWeight: 600,
+                }}
+              >
+                Multi-District Case (Option A Higher Authority)
+              </span>
+            )}
+          </div>
+          <p style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+            Select the designated Competent Authority to scrutinize this proposal based on jurisdiction over affected parcels in the approved inventory.
+          </p>
+
+          {authoritiesNotice && (
+            <div
+              style={{
+                padding: '0.75rem 1rem',
+                borderRadius: '0.375rem',
+                backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                border: '1px solid rgba(245, 158, 11, 0.3)',
+                color: '#fbbf24',
+                fontSize: '0.8125rem',
+                marginBottom: '1rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+              }}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+              <span>{authoritiesNotice}</span>
+            </div>
+          )}
+
+          <div style={{ marginBottom: '1rem' }}>
+            <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, marginBottom: '0.375rem', color: 'var(--text-secondary)' }}>
+              Competent Authority <span style={{ color: 'var(--text-muted)' }}>(Optional during initial draft)</span>
+            </label>
+            <select
+              className="form-select"
+              value={selectedAuthorityId}
+              onChange={(e) => setSelectedAuthorityId(e.target.value)}
+              disabled={isLoadingAuthorities}
+              style={{
+                width: '100%',
+                padding: '0.55rem 0.75rem',
+                borderRadius: '0.375rem',
+                border: '1px solid var(--border-color)',
+                backgroundColor: 'var(--bg-primary)',
+                color: 'var(--text-primary)',
+                fontSize: '0.875rem',
+              }}
+            >
+              <option value="">-- No Competent Authority Selected --</option>
+              {eligibleAuthorities.map((auth) => (
+                <option key={auth.id} value={auth.id}>
+                  {auth.authorityName} ({auth.designation}) — {auth.authorityLevel} [{auth.authorityCode}]
+                </option>
+              ))}
+            </select>
+            {isLoadingAuthorities && (
+              <small style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '0.25rem', display: 'block' }}>
+                Discovering eligible authorities based on parcel geography...
+              </small>
+            )}
+          </div>
+        </div>
+
+        {/* SECTION 4: Acquisition Justification & Public Purpose */}
         <div
           className="card"
           style={{
@@ -573,7 +710,7 @@ export function NewProposalClient({}: NewProposalClientProps) {
           }}
         >
           <h2 style={{ fontSize: '1.125rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '1rem' }}>
-            3. Project Purpose & Acquisition Justification
+            4. Project Purpose & Acquisition Justification
           </h2>
 
           <div style={{ marginBottom: '1.25rem' }}>

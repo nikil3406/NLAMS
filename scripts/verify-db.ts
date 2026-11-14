@@ -111,6 +111,10 @@ async function verify() {
     'acquisition_proposals',
     'acquisition_proposal_versions',
     'acquisition_proposal_workflow_history',
+    'competent_authorities',
+    'authority_jurisdictions',
+    'authority_user_assignments',
+    'proposal_authority_assignments',
   ];
 
   console.log('\n  Tables:');

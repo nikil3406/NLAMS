@@ -25,6 +25,7 @@ export const PROPOSAL_STATUSES = [
   'DRAFT',
   'SUBMITTED',
   'UNDER_REVIEW',
+  'CORRECTION_REQUESTED',
   'APPROVED',
   'REJECTED',
 ] as const;
@@ -34,11 +35,14 @@ export type ProposalStatus = (typeof PROPOSAL_STATUSES)[number];
 export const PROPOSAL_WORKFLOW_ACTIONS = [
   'CREATE_DRAFT',
   'UPDATE_DRAFT',
+  'VALIDATE',
   'SUBMIT',
   'START_REVIEW',
+  'REQUEST_CORRECTIONS',
+  'CREATE_VERSION',
+  'RESUBMIT',
   'APPROVE',
   'REJECT',
-  'REQUEST_CORRECTIONS',
 ] as const;
 
 export type ProposalWorkflowAction = (typeof PROPOSAL_WORKFLOW_ACTIONS)[number];
@@ -95,7 +99,7 @@ export const acquisitionProposals = pgTable(
     index('acquisition_proposals_status_idx').on(table.currentStatus),
     check(
       'acquisition_proposals_status_check',
-      sql`${table.currentStatus} IN ('DRAFT', 'SUBMITTED', 'UNDER_REVIEW', 'APPROVED', 'REJECTED')`
+      sql`${table.currentStatus} IN ('DRAFT', 'SUBMITTED', 'UNDER_REVIEW', 'CORRECTION_REQUESTED', 'APPROVED', 'REJECTED')`
     ),
     check(
       'acquisition_proposals_version_num_check',
@@ -151,6 +155,20 @@ export const acquisitionProposalVersions = pgTable(
     createdBy: uuid('created_by')
       .notNull()
       .references(() => users.id, { onDelete: 'restrict' }),
+    submittedBy: uuid('submitted_by').references(() => users.id, {
+      onDelete: 'restrict',
+    }),
+    submittedAt: timestamp('submitted_at', { withTimezone: true }),
+    reviewedBy: uuid('reviewed_by').references(() => users.id, {
+      onDelete: 'restrict',
+    }),
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+    reviewRemarks: text('review_remarks'),
+    previousVersionId: uuid('previous_version_id').references(
+      (): AnyPgColumn => acquisitionProposalVersions.id,
+      { onDelete: 'set null' }
+    ),
+    selectedAuthorityId: uuid('selected_authority_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -161,13 +179,17 @@ export const acquisitionProposalVersions = pgTable(
     ),
     index('acquisition_proposal_versions_proposal_id_idx').on(table.proposalId),
     index('acquisition_proposal_versions_created_by_idx').on(table.createdBy),
+    index('acquisition_proposal_versions_submitted_by_idx').on(table.submittedBy),
+    index('acquisition_proposal_versions_reviewed_by_idx').on(table.reviewedBy),
+    index('acquisition_proposal_versions_prev_ver_idx').on(table.previousVersionId),
+    index('acquisition_proposal_versions_sel_auth_idx').on(table.selectedAuthorityId),
     check(
       'acquisition_proposal_versions_num_check',
       sql`${table.versionNumber} >= 1`
     ),
     check(
       'acquisition_proposal_versions_status_check',
-      sql`${table.status} IN ('DRAFT', 'SUBMITTED', 'UNDER_REVIEW', 'APPROVED', 'REJECTED')`
+      sql`${table.status} IN ('DRAFT', 'SUBMITTED', 'UNDER_REVIEW', 'CORRECTION_REQUESTED', 'APPROVED', 'REJECTED')`
     ),
   ]
 );
@@ -198,7 +220,7 @@ export const acquisitionProposalWorkflowHistory = pgTable(
     index('acq_prop_wf_history_created_at_idx').on(table.createdAt),
     check(
       'acq_prop_wf_history_action_check',
-      sql`${table.action} IN ('CREATE_DRAFT', 'UPDATE_DRAFT')`
+      sql`${table.action} IN ('CREATE_DRAFT', 'UPDATE_DRAFT', 'VALIDATE', 'SUBMIT', 'START_REVIEW', 'REQUEST_CORRECTIONS', 'CREATE_VERSION', 'RESUBMIT', 'APPROVE', 'REJECT')`
     ),
   ]
 );
@@ -256,6 +278,22 @@ export const acquisitionProposalVersionsRelations = relations(
     creator: one(users, {
       fields: [acquisitionProposalVersions.createdBy],
       references: [users.id],
+      relationName: 'proposalVersionCreator',
+    }),
+    submitter: one(users, {
+      fields: [acquisitionProposalVersions.submittedBy],
+      references: [users.id],
+      relationName: 'proposalVersionSubmitter',
+    }),
+    reviewer: one(users, {
+      fields: [acquisitionProposalVersions.reviewedBy],
+      references: [users.id],
+      relationName: 'proposalVersionReviewer',
+    }),
+    previousVersion: one(acquisitionProposalVersions, {
+      fields: [acquisitionProposalVersions.previousVersionId],
+      references: [acquisitionProposalVersions.id],
+      relationName: 'proposalPreviousVersion',
     }),
   })
 );

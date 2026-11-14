@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm';
 import { db } from '../../db';
 import {
   acquisitionProposals,
@@ -17,6 +17,11 @@ import { implementingAgencies } from '../../db/schema/implementing-agencies';
 import { verifiedLandInventories } from '../../db/schema/verified-land-inventories';
 import { administrativeUnits } from '../../db/schema/administrative-units';
 import { users } from '../../db/schema/users';
+import {
+  competentAuthorities,
+  proposalAuthorityAssignments,
+  type CompetentAuthority,
+} from '../../db/schema/competent-authorities';
 
 type TransactionClient = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -41,6 +46,7 @@ export interface ProposalListItem {
   linkedInventoryVersionId: string;
   currentVersionId: string | null;
   currentVersionNumber: number;
+  versionCount: number;
   currentStatus: string;
   createdAt: Date;
   updatedAt: Date;
@@ -66,6 +72,46 @@ export interface ProposalListItem {
     name: string;
     email: string;
   };
+}
+
+export interface CompetentAuthorityReviewFilterOptions {
+  authorityIds: string[];
+  status?: string;
+  projectId?: string;
+  caseId?: string;
+  agencyId?: string;
+  submittedFrom?: string;
+  submittedTo?: string;
+  search?: string;
+  limit?: number;
+  offset?: number;
+  sortBy?: 'submissionDate' | 'proposalNumber' | 'status' | 'projectName';
+  sortOrder?: 'asc' | 'desc';
+}
+
+export interface CompetentAuthorityReviewItem {
+  id: string;
+  proposalNumber: string;
+  projectId: string;
+  projectName: string;
+  projectCode: string;
+  acquisitionCaseId: string;
+  acquisitionCaseReference: string;
+  acquisitionCaseTitle: string;
+  implementingAgencyId: string;
+  implementingAgencyName: string;
+  implementingAgencyCode: string;
+  currentVersionId: string | null;
+  versionNumber: number;
+  submissionDate: Date | null;
+  submittedBy: { id: string; name: string; email: string } | null;
+  authorityId: string;
+  authorityCode: string;
+  authorityName: string;
+  authorityDesignation: string;
+  authorityLevel: string;
+  status: string;
+  createdAt: Date;
 }
 
 export interface ProposalWithDetails extends AcquisitionProposal {
@@ -114,6 +160,20 @@ export interface ProposalWithDetails extends AcquisitionProposal {
     reviewedAt: Date | null;
   };
   currentVersion: AcquisitionProposalVersion | null;
+  selectedAuthority?: {
+    id: string;
+    authorityCode: string;
+    authorityName: string;
+    designation: string;
+    authorityLevel: string;
+    status: string;
+    assignment?: {
+      id: string;
+      assignedAt: Date;
+      assignedBy: string;
+      assignmentStatus: string;
+    } | null;
+  } | null;
   workflowHistory: (AcquisitionProposalWorkflowHistory & {
     actor: {
       id: string;
@@ -374,6 +434,63 @@ export class AcquisitionProposalRepository {
       actor: h.actor,
     }));
 
+    // Fetch active authority assignment if present
+    let selectedAuthority: ProposalWithDetails['selectedAuthority'] = null;
+    if (currentVersion?.id) {
+      const [authRow] = await executor
+        .select({
+          assignment: proposalAuthorityAssignments,
+          authority: competentAuthorities,
+        })
+        .from(proposalAuthorityAssignments)
+        .innerJoin(
+          competentAuthorities,
+          eq(proposalAuthorityAssignments.authorityId, competentAuthorities.id)
+        )
+        .where(
+          and(
+            eq(proposalAuthorityAssignments.proposalVersionId, currentVersion.id),
+            eq(proposalAuthorityAssignments.assignmentStatus, 'ACTIVE')
+          )
+        )
+        .orderBy(desc(proposalAuthorityAssignments.assignedAt))
+        .limit(1);
+
+      if (authRow) {
+        selectedAuthority = {
+          id: authRow.authority.id,
+          authorityCode: authRow.authority.authorityCode,
+          authorityName: authRow.authority.authorityName,
+          designation: authRow.authority.designation,
+          authorityLevel: authRow.authority.authorityLevel,
+          status: authRow.authority.status,
+          assignment: {
+            id: authRow.assignment.id,
+            assignedAt: authRow.assignment.assignedAt,
+            assignedBy: authRow.assignment.assignedBy,
+            assignmentStatus: authRow.assignment.assignmentStatus,
+          },
+        };
+      } else if (currentVersion.selectedAuthorityId) {
+        const [auth] = await executor
+          .select()
+          .from(competentAuthorities)
+          .where(eq(competentAuthorities.id, currentVersion.selectedAuthorityId))
+          .limit(1);
+        if (auth) {
+          selectedAuthority = {
+            id: auth.id,
+            authorityCode: auth.authorityCode,
+            authorityName: auth.authorityName,
+            designation: auth.designation,
+            authorityLevel: auth.authorityLevel,
+            status: auth.status,
+            assignment: null,
+          };
+        }
+      }
+    }
+
     return {
       ...header,
       project: {
@@ -395,6 +512,7 @@ export class AcquisitionProposalRepository {
       creator,
       linkedInventory: inventory,
       currentVersion,
+      selectedAuthority,
       workflowHistory,
     };
   }
@@ -487,6 +605,7 @@ export class AcquisitionProposalRepository {
         linkedInventoryVersionId: acquisitionProposals.linkedInventoryVersionId,
         currentVersionId: acquisitionProposals.currentVersionId,
         currentVersionNumber: acquisitionProposals.currentVersionNumber,
+        versionCount: sql<number>`(SELECT count(*)::int FROM acquisition_proposal_versions WHERE acquisition_proposal_versions.proposal_id = ${acquisitionProposals.id})`,
         currentStatus: acquisitionProposals.currentStatus,
         createdAt: acquisitionProposals.createdAt,
         updatedAt: acquisitionProposals.updatedAt,
@@ -598,6 +717,438 @@ export class AcquisitionProposalRepository {
     }
 
     const [row] = await query;
+    return row?.count ?? 0;
+  }
+
+  /**
+   * Retrieves all versions for a proposal, sorted by version number.
+   */
+  async findProposalVersions(
+    proposalId: string,
+    txClient?: TransactionClient
+  ): Promise<
+    (AcquisitionProposalVersion & {
+      creator: { id: string; name: string; email: string };
+      submitter?: { id: string; name: string; email: string } | null;
+      reviewer?: { id: string; name: string; email: string } | null;
+    })[]
+  > {
+    const executor = (txClient ?? db) as typeof db;
+
+    const versions = await executor
+      .select()
+      .from(acquisitionProposalVersions)
+      .where(eq(acquisitionProposalVersions.proposalId, proposalId))
+      .orderBy(desc(acquisitionProposalVersions.versionNumber));
+
+    const result = [];
+    for (const v of versions) {
+      const [creator] = await executor
+        .select({ id: users.id, name: users.name, email: users.email })
+        .from(users)
+        .where(eq(users.id, v.createdBy))
+        .limit(1);
+
+      let submitter = null;
+      if (v.submittedBy) {
+        const [sub] = await executor
+          .select({ id: users.id, name: users.name, email: users.email })
+          .from(users)
+          .where(eq(users.id, v.submittedBy))
+          .limit(1);
+        submitter = sub ?? null;
+      }
+
+      let reviewer = null;
+      if (v.reviewedBy) {
+        const [rev] = await executor
+          .select({ id: users.id, name: users.name, email: users.email })
+          .from(users)
+          .where(eq(users.id, v.reviewedBy))
+          .limit(1);
+        reviewer = rev ?? null;
+      }
+
+      result.push({
+        ...v,
+        creator: creator ?? { id: v.createdBy, name: 'Unknown', email: '' },
+        submitter,
+        reviewer,
+      });
+    }
+
+    return result;
+  }
+
+  /**
+   * Finds a specific version by its version ID.
+   */
+  async findProposalVersionById(
+    versionId: string,
+    txClient?: TransactionClient
+  ): Promise<
+    | (AcquisitionProposalVersion & {
+        creator: { id: string; name: string; email: string };
+        submitter?: { id: string; name: string; email: string } | null;
+        reviewer?: { id: string; name: string; email: string } | null;
+      })
+    | null
+  > {
+    const executor = (txClient ?? db) as typeof db;
+
+    const [ver] = await executor
+      .select()
+      .from(acquisitionProposalVersions)
+      .where(eq(acquisitionProposalVersions.id, versionId))
+      .limit(1);
+
+    if (!ver) return null;
+
+    const [creator] = await executor
+      .select({ id: users.id, name: users.name, email: users.email })
+      .from(users)
+      .where(eq(users.id, ver.createdBy))
+      .limit(1);
+
+    let submitter = null;
+    if (ver.submittedBy) {
+      const [sub] = await executor
+        .select({ id: users.id, name: users.name, email: users.email })
+        .from(users)
+        .where(eq(users.id, ver.submittedBy))
+        .limit(1);
+      submitter = sub ?? null;
+    }
+
+    let reviewer = null;
+    if (ver.reviewedBy) {
+      const [rev] = await executor
+        .select({ id: users.id, name: users.name, email: users.email })
+        .from(users)
+        .where(eq(users.id, ver.reviewedBy))
+        .limit(1);
+      reviewer = rev ?? null;
+    }
+
+    return {
+      ...ver,
+      creator: creator ?? { id: ver.createdBy, name: 'Unknown', email: '' },
+      submitter,
+      reviewer,
+    };
+  }
+
+  /**
+   * Finds a specific version by proposal ID and version number.
+   */
+  async findProposalVersionByNumber(
+    proposalId: string,
+    versionNumber: number,
+    txClient?: TransactionClient
+  ): Promise<
+    | (AcquisitionProposalVersion & {
+        creator: { id: string; name: string; email: string };
+        submitter?: { id: string; name: string; email: string } | null;
+        reviewer?: { id: string; name: string; email: string } | null;
+      })
+    | null
+  > {
+    const executor = (txClient ?? db) as typeof db;
+
+    const [ver] = await executor
+      .select()
+      .from(acquisitionProposalVersions)
+      .where(
+        and(
+          eq(acquisitionProposalVersions.proposalId, proposalId),
+          eq(acquisitionProposalVersions.versionNumber, versionNumber)
+        )
+      )
+      .limit(1);
+
+    if (!ver) return null;
+
+    const [creator] = await executor
+      .select({ id: users.id, name: users.name, email: users.email })
+      .from(users)
+      .where(eq(users.id, ver.createdBy))
+      .limit(1);
+
+    let submitter = null;
+    if (ver.submittedBy) {
+      const [sub] = await executor
+        .select({ id: users.id, name: users.name, email: users.email })
+        .from(users)
+        .where(eq(users.id, ver.submittedBy))
+        .limit(1);
+      submitter = sub ?? null;
+    }
+
+    let reviewer = null;
+    if (ver.reviewedBy) {
+      const [rev] = await executor
+        .select({ id: users.id, name: users.name, email: users.email })
+        .from(users)
+        .where(eq(users.id, ver.reviewedBy))
+        .limit(1);
+      reviewer = rev ?? null;
+    }
+
+    return {
+      ...ver,
+      creator: creator ?? { id: ver.createdBy, name: 'Unknown', email: '' },
+      submitter,
+      reviewer,
+    };
+  }
+
+  /**
+   * Gets the highest version number recorded for a proposal.
+   */
+  async getMaxVersionNumber(
+    proposalId: string,
+    txClient?: TransactionClient
+  ): Promise<number> {
+    const executor = (txClient ?? db) as typeof db;
+    const [row] = await executor
+      .select({ maxVer: sql<number>`max(${acquisitionProposalVersions.versionNumber})::int` })
+      .from(acquisitionProposalVersions)
+      .where(eq(acquisitionProposalVersions.proposalId, proposalId));
+    return row?.maxVer ?? 0;
+  }
+
+  /**
+   * Retrieves proposals submitted to Competent Authorities for scrutiny review.
+   * Only includes proposals assigned to the specified authorityIds.
+   */
+  async findProposalsForCompetentAuthorityReview(
+    options: CompetentAuthorityReviewFilterOptions
+  ): Promise<CompetentAuthorityReviewItem[]> {
+    if (!options.authorityIds || options.authorityIds.length === 0) {
+      return [];
+    }
+
+    const conditions = [
+      inArray(competentAuthorities.id, options.authorityIds),
+      eq(proposalAuthorityAssignments.assignmentStatus, 'ACTIVE'),
+    ];
+
+    if (options.status) {
+      conditions.push(eq(acquisitionProposals.currentStatus, options.status));
+    }
+
+    if (options.projectId) {
+      conditions.push(eq(acquisitionProposals.projectId, options.projectId));
+    }
+
+    if (options.caseId) {
+      conditions.push(eq(acquisitionProposals.acquisitionCaseId, options.caseId));
+    }
+
+    if (options.agencyId) {
+      conditions.push(eq(acquisitionProposals.implementingAgencyId, options.agencyId));
+    }
+
+    if (options.submittedFrom) {
+      conditions.push(
+        sql`${acquisitionProposalVersions.submittedAt} >= ${options.submittedFrom}::timestamptz`
+      );
+    }
+
+    if (options.submittedTo) {
+      conditions.push(
+        sql`${acquisitionProposalVersions.submittedAt} <= ${options.submittedTo}::timestamptz`
+      );
+    }
+
+    if (options.search && options.search.trim()) {
+      const term = `%${options.search.trim()}%`;
+      const searchClause = or(
+        ilike(acquisitionProposals.proposalNumber, term),
+        ilike(acquisitionCases.caseReference, term),
+        ilike(acquisitionCases.title, term),
+        ilike(projects.name, term),
+        ilike(projects.projectCode, term),
+        ilike(implementingAgencies.name, term)
+      );
+      if (searchClause) {
+        conditions.push(searchClause);
+      }
+    }
+
+    let orderExpr;
+    if (options.sortBy === 'proposalNumber') {
+      orderExpr = options.sortOrder === 'asc' ? asc(acquisitionProposals.proposalNumber) : desc(acquisitionProposals.proposalNumber);
+    } else if (options.sortBy === 'status') {
+      orderExpr = options.sortOrder === 'asc' ? asc(acquisitionProposals.currentStatus) : desc(acquisitionProposals.currentStatus);
+    } else if (options.sortBy === 'projectName') {
+      orderExpr = options.sortOrder === 'asc' ? asc(projects.name) : desc(projects.name);
+    } else {
+      orderExpr = options.sortOrder === 'asc' ? asc(acquisitionProposalVersions.submittedAt) : desc(acquisitionProposalVersions.submittedAt);
+    }
+
+    let query = db
+      .select({
+        id: acquisitionProposals.id,
+        proposalNumber: acquisitionProposals.proposalNumber,
+        projectId: projects.id,
+        projectName: projects.name,
+        projectCode: projects.projectCode,
+        acquisitionCaseId: acquisitionCases.id,
+        acquisitionCaseReference: acquisitionCases.caseReference,
+        acquisitionCaseTitle: acquisitionCases.title,
+        implementingAgencyId: implementingAgencies.id,
+        implementingAgencyName: implementingAgencies.name,
+        implementingAgencyCode: implementingAgencies.code,
+        currentVersionId: acquisitionProposalVersions.id,
+        versionNumber: acquisitionProposalVersions.versionNumber,
+        submissionDate: acquisitionProposalVersions.submittedAt,
+        submittedById: users.id,
+        submittedByName: users.name,
+        submittedByEmail: users.email,
+        authorityId: competentAuthorities.id,
+        authorityCode: competentAuthorities.authorityCode,
+        authorityName: competentAuthorities.authorityName,
+        authorityDesignation: competentAuthorities.designation,
+        authorityLevel: competentAuthorities.authorityLevel,
+        status: acquisitionProposals.currentStatus,
+        createdAt: acquisitionProposals.createdAt,
+      })
+      .from(acquisitionProposals)
+      .innerJoin(
+        acquisitionProposalVersions,
+        eq(acquisitionProposals.currentVersionId, acquisitionProposalVersions.id)
+      )
+      .innerJoin(
+        proposalAuthorityAssignments,
+        eq(proposalAuthorityAssignments.proposalVersionId, acquisitionProposalVersions.id)
+      )
+      .innerJoin(
+        competentAuthorities,
+        eq(proposalAuthorityAssignments.authorityId, competentAuthorities.id)
+      )
+      .innerJoin(projects, eq(acquisitionProposals.projectId, projects.id))
+      .innerJoin(acquisitionCases, eq(acquisitionProposals.acquisitionCaseId, acquisitionCases.id))
+      .innerJoin(implementingAgencies, eq(acquisitionProposals.implementingAgencyId, implementingAgencies.id))
+      .leftJoin(users, eq(acquisitionProposalVersions.submittedBy, users.id))
+      .where(and(...conditions))
+      .orderBy(orderExpr)
+      .$dynamic();
+
+    if (options.limit) {
+      query = query.limit(options.limit);
+    }
+
+    if (options.offset) {
+      query = query.offset(options.offset);
+    }
+
+    const rows = await query;
+
+    return rows.map((r) => ({
+      id: r.id,
+      proposalNumber: r.proposalNumber,
+      projectId: r.projectId,
+      projectName: r.projectName,
+      projectCode: r.projectCode,
+      acquisitionCaseId: r.acquisitionCaseId,
+      acquisitionCaseReference: r.acquisitionCaseReference,
+      acquisitionCaseTitle: r.acquisitionCaseTitle,
+      implementingAgencyId: r.implementingAgencyId,
+      implementingAgencyName: r.implementingAgencyName,
+      implementingAgencyCode: r.implementingAgencyCode,
+      currentVersionId: r.currentVersionId,
+      versionNumber: r.versionNumber,
+      submissionDate: r.submissionDate,
+      submittedBy: r.submittedById ? { id: r.submittedById, name: r.submittedByName ?? 'Unknown', email: r.submittedByEmail ?? '' } : null,
+      authorityId: r.authorityId,
+      authorityCode: r.authorityCode,
+      authorityName: r.authorityName,
+      authorityDesignation: r.authorityDesignation,
+      authorityLevel: r.authorityLevel,
+      status: r.status,
+      createdAt: r.createdAt,
+    }));
+  }
+
+  /**
+   * Counts proposals submitted to Competent Authorities for scrutiny review.
+   */
+  async countProposalsForCompetentAuthorityReview(
+    options: CompetentAuthorityReviewFilterOptions
+  ): Promise<number> {
+    if (!options.authorityIds || options.authorityIds.length === 0) {
+      return 0;
+    }
+
+    const conditions = [
+      inArray(competentAuthorities.id, options.authorityIds),
+      eq(proposalAuthorityAssignments.assignmentStatus, 'ACTIVE'),
+    ];
+
+    if (options.status) {
+      conditions.push(eq(acquisitionProposals.currentStatus, options.status));
+    }
+
+    if (options.projectId) {
+      conditions.push(eq(acquisitionProposals.projectId, options.projectId));
+    }
+
+    if (options.caseId) {
+      conditions.push(eq(acquisitionProposals.acquisitionCaseId, options.caseId));
+    }
+
+    if (options.agencyId) {
+      conditions.push(eq(acquisitionProposals.implementingAgencyId, options.agencyId));
+    }
+
+    if (options.submittedFrom) {
+      conditions.push(
+        sql`${acquisitionProposalVersions.submittedAt} >= ${options.submittedFrom}::timestamptz`
+      );
+    }
+
+    if (options.submittedTo) {
+      conditions.push(
+        sql`${acquisitionProposalVersions.submittedAt} <= ${options.submittedTo}::timestamptz`
+      );
+    }
+
+    if (options.search && options.search.trim()) {
+      const term = `%${options.search.trim()}%`;
+      const searchClause = or(
+        ilike(acquisitionProposals.proposalNumber, term),
+        ilike(acquisitionCases.caseReference, term),
+        ilike(acquisitionCases.title, term),
+        ilike(projects.name, term),
+        ilike(projects.projectCode, term),
+        ilike(implementingAgencies.name, term)
+      );
+      if (searchClause) {
+        conditions.push(searchClause);
+      }
+    }
+
+    const [row] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(acquisitionProposals)
+      .innerJoin(
+        acquisitionProposalVersions,
+        eq(acquisitionProposals.currentVersionId, acquisitionProposalVersions.id)
+      )
+      .innerJoin(
+        proposalAuthorityAssignments,
+        eq(proposalAuthorityAssignments.proposalVersionId, acquisitionProposalVersions.id)
+      )
+      .innerJoin(
+        competentAuthorities,
+        eq(proposalAuthorityAssignments.authorityId, competentAuthorities.id)
+      )
+      .innerJoin(projects, eq(acquisitionProposals.projectId, projects.id))
+      .innerJoin(acquisitionCases, eq(acquisitionProposals.acquisitionCaseId, acquisitionCases.id))
+      .innerJoin(implementingAgencies, eq(acquisitionProposals.implementingAgencyId, implementingAgencies.id))
+      .where(and(...conditions));
+
     return row?.count ?? 0;
   }
 }

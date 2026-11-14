@@ -11,3 +11,4 @@ export * from './parcel.repository';
 export * from './field-verification-report.repository';
 export * from './verified-land-inventory.repository';
 export * from './acquisition-proposal.repository';
+export * from './competent-authority.repository';

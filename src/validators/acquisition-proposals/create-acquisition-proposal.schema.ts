@@ -59,6 +59,11 @@ export const createAcquisitionProposalSchema = z.object({
     .array(supportingDocumentSchema)
     .optional()
     .nullable(),
+  competentAuthorityId: z
+    .string()
+    .uuid({ message: 'Invalid Competent Authority ID format' })
+    .optional()
+    .nullable(),
 
   // Strictly forbidden client-supplied fields
   id: z

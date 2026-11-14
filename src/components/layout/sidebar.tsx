@@ -137,6 +137,20 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = true, onClose }) => {
           ),
         },
         {
+          name: 'Authority Reviews',
+          href: '/competent-authority/reviews',
+          isAvailable: true,
+          badge: 'CA',
+          icon: () => (
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 3v18" />
+              <path d="m3 7 9-4 9 4" />
+              <path d="M6 10l-3 6h6l-3-6z" />
+              <path d="M18 10l-3 6h6l-3-6z" />
+            </svg>
+          ),
+        },
+        {
           name: 'GIS & Spatial',
           href: '/gis',
           isAvailable: false,
