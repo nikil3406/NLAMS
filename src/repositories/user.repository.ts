@@ -5,7 +5,10 @@ import { roles, type Role } from '../../db/schema/roles';
 import { userRoles } from '../../db/schema/user-roles';
 import { administrativeUnits } from '../../db/schema/administrative-units';
 import { userAssignments } from '../../db/schema/user-assignments';
-
+import {
+  authorityUserAssignments,
+  competentAuthorities,
+} from '../../db/schema/competent-authorities';
 
 export interface UserAssignmentDetail {
   id: string;
@@ -20,6 +23,20 @@ export interface UserAssignmentDetail {
   createdAt: Date;
 }
 
+export interface UserAuthorityAssignmentDetail {
+  id: string;
+  authorityId: string;
+  authorityCode: string;
+  authorityName: string;
+  designation: string;
+  authorityLevel: string;
+  status: 'ACTIVE' | 'INACTIVE';
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+  assignedBy: string;
+  createdAt: Date;
+}
+
 export interface UserWithDetails {
   id: string;
   name: string;
@@ -30,6 +47,7 @@ export interface UserWithDetails {
   updatedAt: Date;
   roles: Role[];
   assignments: UserAssignmentDetail[];
+  authorityAssignments?: UserAuthorityAssignmentDetail[];
 }
 
 export interface ListUsersRepoOptions {
@@ -58,6 +76,7 @@ export interface CreateUserData {
   status?: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED';
   roleId: string;
   administrativeUnitId: string;
+  competentAuthorityId?: string | null;
   assignedBy: string;
 }
 
@@ -156,6 +175,28 @@ export class UserRepository {
       .where(eq(userAssignments.userId, id))
       .orderBy(desc(userAssignments.createdAt));
 
+    const authorityAssignmentsList = await db
+      .select({
+        id: authorityUserAssignments.id,
+        authorityId: competentAuthorities.id,
+        authorityCode: competentAuthorities.authorityCode,
+        authorityName: competentAuthorities.authorityName,
+        designation: competentAuthorities.designation,
+        authorityLevel: competentAuthorities.authorityLevel,
+        status: authorityUserAssignments.status,
+        effectiveFrom: authorityUserAssignments.effectiveFrom,
+        effectiveUntil: authorityUserAssignments.effectiveUntil,
+        assignedBy: authorityUserAssignments.assignedBy,
+        createdAt: authorityUserAssignments.createdAt,
+      })
+      .from(authorityUserAssignments)
+      .innerJoin(
+        competentAuthorities,
+        eq(authorityUserAssignments.authorityId, competentAuthorities.id)
+      )
+      .where(eq(authorityUserAssignments.userId, id))
+      .orderBy(desc(authorityUserAssignments.createdAt));
+
     return {
       id: user.id,
       name: user.name,
@@ -166,6 +207,7 @@ export class UserRepository {
       updatedAt: user.updatedAt,
       roles: userRolesList,
       assignments: assignmentsList,
+      authorityAssignments: authorityAssignmentsList as UserAuthorityAssignmentDetail[],
     };
   }
 
@@ -334,6 +376,39 @@ export class UserRepository {
       assignmentsMap.set(a.userId, list);
     }
 
+    // Batch fetch authority assignments for all selected users
+    const allAuthAssignments = await db
+      .select({
+        userId: authorityUserAssignments.userId,
+        assignment: {
+          id: authorityUserAssignments.id,
+          authorityId: competentAuthorities.id,
+          authorityCode: competentAuthorities.authorityCode,
+          authorityName: competentAuthorities.authorityName,
+          designation: competentAuthorities.designation,
+          authorityLevel: competentAuthorities.authorityLevel,
+          status: authorityUserAssignments.status,
+          effectiveFrom: authorityUserAssignments.effectiveFrom,
+          effectiveUntil: authorityUserAssignments.effectiveUntil,
+          assignedBy: authorityUserAssignments.assignedBy,
+          createdAt: authorityUserAssignments.createdAt,
+        },
+      })
+      .from(authorityUserAssignments)
+      .innerJoin(
+        competentAuthorities,
+        eq(authorityUserAssignments.authorityId, competentAuthorities.id)
+      )
+      .where(inArray(authorityUserAssignments.userId, userIds))
+      .orderBy(desc(authorityUserAssignments.createdAt));
+
+    const authAssignmentsMap = new Map<string, UserAuthorityAssignmentDetail[]>();
+    for (const a of allAuthAssignments) {
+      const list = authAssignmentsMap.get(a.userId) ?? [];
+      list.push(a.assignment as UserAuthorityAssignmentDetail);
+      authAssignmentsMap.set(a.userId, list);
+    }
+
     const enrichedUsers: UserWithDetails[] = userRows.map((u) => ({
       id: u.id,
       name: u.name,
@@ -344,6 +419,7 @@ export class UserRepository {
       updatedAt: u.updatedAt,
       roles: rolesMap.get(u.id) ?? [],
       assignments: assignmentsMap.get(u.id) ?? [],
+      authorityAssignments: authAssignmentsMap.get(u.id) ?? [],
     }));
 
     return {
@@ -391,6 +467,43 @@ export class UserRepository {
         startDate: today,
         status: 'ACTIVE',
       });
+
+      // 3b. Insert initial Competent Authority assignment if provided
+      let createdAuthAssignment: UserAuthorityAssignmentDetail | null = null;
+      if (data.competentAuthorityId) {
+        const [authAssign] = await tx
+          .insert(authorityUserAssignments)
+          .values({
+            authorityId: data.competentAuthorityId,
+            userId: user.id,
+            assignedBy: data.assignedBy,
+            effectiveFrom: today,
+            status: 'ACTIVE',
+          })
+          .returning();
+
+        const [auth] = await tx
+          .select()
+          .from(competentAuthorities)
+          .where(eq(competentAuthorities.id, data.competentAuthorityId))
+          .limit(1);
+
+        if (auth && authAssign) {
+          createdAuthAssignment = {
+            id: authAssign.id,
+            authorityId: auth.id,
+            authorityCode: auth.authorityCode,
+            authorityName: auth.authorityName,
+            designation: auth.designation,
+            authorityLevel: auth.authorityLevel,
+            status: authAssign.status as 'ACTIVE' | 'INACTIVE',
+            effectiveFrom: authAssign.effectiveFrom,
+            effectiveUntil: authAssign.effectiveUntil,
+            assignedBy: authAssign.assignedBy,
+            createdAt: authAssign.createdAt,
+          };
+        }
+      }
 
       // 4. Fetch the role and administrative unit details for the return value
       const [role] = await tx
@@ -441,6 +554,7 @@ export class UserRepository {
               },
             ]
           : [],
+        authorityAssignments: createdAuthAssignment ? [createdAuthAssignment] : [],
       };
     });
   }
@@ -505,6 +619,146 @@ export class UserRepository {
       .returning();
 
     return updated ?? null;
+  }
+
+  /**
+   * Retrieves all authority assignments for a specific user.
+   */
+  async findAuthorityAssignmentsByUserId(
+    userId: string
+  ): Promise<UserAuthorityAssignmentDetail[]> {
+    const rows = await db
+      .select({
+        id: authorityUserAssignments.id,
+        authorityId: competentAuthorities.id,
+        authorityCode: competentAuthorities.authorityCode,
+        authorityName: competentAuthorities.authorityName,
+        designation: competentAuthorities.designation,
+        authorityLevel: competentAuthorities.authorityLevel,
+        status: authorityUserAssignments.status,
+        effectiveFrom: authorityUserAssignments.effectiveFrom,
+        effectiveUntil: authorityUserAssignments.effectiveUntil,
+        assignedBy: authorityUserAssignments.assignedBy,
+        createdAt: authorityUserAssignments.createdAt,
+      })
+      .from(authorityUserAssignments)
+      .innerJoin(
+        competentAuthorities,
+        eq(authorityUserAssignments.authorityId, competentAuthorities.id)
+      )
+      .where(eq(authorityUserAssignments.userId, userId))
+      .orderBy(desc(authorityUserAssignments.createdAt));
+
+    return rows as UserAuthorityAssignmentDetail[];
+  }
+
+  /**
+   * Updates an existing authority user assignment (e.g. status, effectiveUntil).
+   */
+  async updateAuthorityUserAssignment(
+    assignmentId: string,
+    data: {
+      status?: 'ACTIVE' | 'INACTIVE';
+      effectiveUntil?: string | null;
+    }
+  ) {
+    const updateData: Record<string, unknown> = {
+      updatedAt: new Date(),
+    };
+    if (data.status !== undefined) updateData.status = data.status;
+    if (data.effectiveUntil !== undefined) updateData.effectiveUntil = data.effectiveUntil;
+
+    const [updated] = await db
+      .update(authorityUserAssignments)
+      .set(updateData)
+      .where(eq(authorityUserAssignments.id, assignmentId))
+      .returning();
+
+    return updated ?? null;
+  }
+
+  /**
+   * Deactivates all active authority assignments for a user without deleting history.
+   */
+  async deactivateActiveAuthorityAssignmentsForUser(userId: string) {
+    const today = new Date().toISOString().split('T')[0];
+    await db
+      .update(authorityUserAssignments)
+      .set({
+        status: 'INACTIVE',
+        effectiveUntil: today,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(authorityUserAssignments.userId, userId),
+          eq(authorityUserAssignments.status, 'ACTIVE')
+        )
+      );
+  }
+
+  /**
+   * Assigns or updates a user's authority assignment transactionally.
+   * Preserves history by deactivating any existing active assignment for that user.
+   */
+  async reassignUserAuthority(
+    userId: string,
+    authorityId: string,
+    assignedBy: string,
+    effectiveFrom?: string,
+    effectiveUntil?: string | null
+  ): Promise<UserAuthorityAssignmentDetail> {
+    const today = effectiveFrom || new Date().toISOString().split('T')[0];
+    return await db.transaction(async (tx) => {
+      // 1. Deactivate existing active assignments (preserve historical records)
+      await tx
+        .update(authorityUserAssignments)
+        .set({
+          status: 'INACTIVE',
+          effectiveUntil: today,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(authorityUserAssignments.userId, userId),
+            eq(authorityUserAssignments.status, 'ACTIVE')
+          )
+        );
+
+      // 2. Insert new active assignment
+      const [newAssign] = await tx
+        .insert(authorityUserAssignments)
+        .values({
+          authorityId,
+          userId,
+          assignedBy,
+          effectiveFrom: today,
+          effectiveUntil: effectiveUntil || null,
+          status: 'ACTIVE',
+        })
+        .returning();
+
+      // 3. Fetch details
+      const [auth] = await tx
+        .select()
+        .from(competentAuthorities)
+        .where(eq(competentAuthorities.id, authorityId))
+        .limit(1);
+
+      return {
+        id: newAssign.id,
+        authorityId: auth.id,
+        authorityCode: auth.authorityCode,
+        authorityName: auth.authorityName,
+        designation: auth.designation,
+        authorityLevel: auth.authorityLevel,
+        status: newAssign.status as 'ACTIVE' | 'INACTIVE',
+        effectiveFrom: newAssign.effectiveFrom,
+        effectiveUntil: newAssign.effectiveUntil,
+        assignedBy: newAssign.assignedBy,
+        createdAt: newAssign.createdAt,
+      };
+    });
   }
 }
 

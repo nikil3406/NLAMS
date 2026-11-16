@@ -184,11 +184,26 @@ export class CompetentAuthorityService {
    */
   async listAuthorities(
     options: AuthorityFilterOptions = {}
-  ): Promise<{ data: CompetentAuthority[]; total: number }> {
+  ): Promise<{ data: (CompetentAuthority & { jurisdictions?: AuthorityJurisdictionWithUnits[] })[]; total: number }> {
     const [data, total] = await Promise.all([
       competentAuthorityRepository.findAuthorities(options),
       competentAuthorityRepository.countAuthorities(options),
     ]);
+
+    if (options.includeJurisdictions) {
+      const enriched = await Promise.all(
+        data.map(async (auth) => {
+          const jurisdictions =
+            await competentAuthorityRepository.findJurisdictionsByAuthorityId(auth.id);
+          return {
+            ...auth,
+            jurisdictions: jurisdictions.filter((j) => j.status === 'ACTIVE'),
+          };
+        })
+      );
+      return { data: enriched, total };
+    }
+
     return { data, total };
   }
 

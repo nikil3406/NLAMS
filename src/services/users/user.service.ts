@@ -6,6 +6,7 @@ import {
 } from '../../repositories/user.repository';
 import { roleRepository } from '../../repositories/role.repository';
 import { administrativeUnitRepository } from '../../repositories/administrative-unit.repository';
+import { competentAuthorityRepository } from '../../repositories/competent-authority.repository';
 import { permissionService } from '../authorization/permission.service';
 import { authorizationService } from '../authorization/authorization.service';
 import { scopeService } from '../authorization/scope.service';
@@ -200,6 +201,41 @@ export class UserService {
       );
     }
 
+    // 4b. Competent Authority validation if assigning COMPETENT_AUTHORITY role
+    let competentAuthorityIdToAssign: string | null = null;
+    if (role.name === 'COMPETENT_AUTHORITY') {
+      if (!input.competentAuthorityId) {
+        throw new BadRequestError(
+          'Competent Authority selection is required when creating a user with the COMPETENT_AUTHORITY role'
+        );
+      }
+      const authority = await competentAuthorityRepository.findAuthorityById(
+        input.competentAuthorityId
+      );
+      if (!authority) {
+        throw new NotFoundError(
+          `Selected Competent Authority '${input.competentAuthorityId}' does not exist`
+        );
+      }
+      if (authority.status !== 'ACTIVE') {
+        throw new BadRequestError(
+          `Cannot link user to Competent Authority '${authority.authorityName}': authority is INACTIVE`
+        );
+      }
+      const today = new Date().toISOString().slice(0, 10);
+      if (authority.effectiveFrom > today) {
+        throw new BadRequestError(
+          `Cannot link user to Competent Authority '${authority.authorityName}': effective date is in the future`
+        );
+      }
+      if (authority.effectiveUntil && authority.effectiveUntil < today) {
+        throw new BadRequestError(
+          `Cannot link user to Competent Authority '${authority.authorityName}': authority has expired`
+        );
+      }
+      competentAuthorityIdToAssign = authority.id;
+    }
+
     // 5. Password handling
     let initialPassword = input.password?.trim();
     let wasGenerated = false;
@@ -220,6 +256,7 @@ export class UserService {
       status: 'ACTIVE',
       roleId: input.roleId,
       administrativeUnitId: input.administrativeUnitId,
+      competentAuthorityId: competentAuthorityIdToAssign,
       assignedBy: actorUserId,
     });
 
@@ -330,6 +367,156 @@ export class UserService {
     }
 
     return sanitizeUser(updated);
+  }
+
+  /**
+   * Retrieves all authority assignments for a target user.
+   */
+  async getUserAuthorityAssignments(actorUserId: string, targetUserId: string) {
+    await permissionService.requirePermission(actorUserId, 'USER_VIEW');
+
+    const targetUser = await userRepository.findUserById(targetUserId);
+    if (!targetUser) {
+      throw new NotFoundError('Target user not found');
+    }
+
+    return userRepository.findAuthorityAssignmentsByUserId(targetUserId);
+  }
+
+  /**
+   * Assigns or updates the Competent Authority associated with a user.
+   * Preserves historical records by deactivating previous assignments.
+   */
+  async assignUserAuthority(
+    actorUserId: string,
+    targetUserId: string,
+    input: {
+      authorityId: string;
+      effectiveFrom?: string;
+      effectiveUntil?: string | null;
+    }
+  ) {
+    await permissionService.requirePermission(actorUserId, 'USER_ASSIGN');
+
+    const targetUser = await userRepository.findUserDetailsById(targetUserId);
+    if (!targetUser) {
+      throw new NotFoundError('Target user not found');
+    }
+
+    await authorizationService.requireCanManageUser(actorUserId, targetUserId, {
+      requiredPermission: 'USER_ASSIGN',
+    });
+
+    // Ensure target user holds the COMPETENT_AUTHORITY role
+    const hasRole = targetUser.roles.some((r) => r.name === 'COMPETENT_AUTHORITY');
+    if (!hasRole) {
+      throw new BadRequestError(
+        'Cannot assign Competent Authority: user does not hold the COMPETENT_AUTHORITY role'
+      );
+    }
+
+    // Verify authority exists and is active
+    const authority = await competentAuthorityRepository.findAuthorityById(input.authorityId);
+    if (!authority) {
+      throw new NotFoundError(`Competent Authority '${input.authorityId}' not found`);
+    }
+    if (authority.status !== 'ACTIVE') {
+      throw new BadRequestError(
+        `Cannot assign user to Competent Authority '${authority.authorityName}': authority is INACTIVE`
+      );
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    if (authority.effectiveFrom > today) {
+      throw new BadRequestError(
+        `Cannot assign user to Competent Authority '${authority.authorityName}': effective date is in the future`
+      );
+    }
+    if (authority.effectiveUntil && authority.effectiveUntil < today) {
+      throw new BadRequestError(
+        `Cannot assign user to Competent Authority '${authority.authorityName}': authority has expired`
+      );
+    }
+
+    return userRepository.reassignUserAuthority(
+      targetUserId,
+      input.authorityId,
+      actorUserId,
+      input.effectiveFrom,
+      input.effectiveUntil
+    );
+  }
+
+  /**
+   * Updates an existing authority assignment status (e.g. deactivate or activate).
+   * Does NOT delete the historical record.
+   */
+  async updateUserAuthorityAssignmentStatus(
+    actorUserId: string,
+    targetUserId: string,
+    assignmentId: string,
+    input: {
+      status: 'ACTIVE' | 'INACTIVE';
+      effectiveUntil?: string | null;
+    }
+  ) {
+    await permissionService.requirePermission(actorUserId, 'USER_ASSIGN');
+
+    const targetUser = await userRepository.findUserDetailsById(targetUserId);
+    if (!targetUser) {
+      throw new NotFoundError('Target user not found');
+    }
+
+    await authorizationService.requireCanManageUser(actorUserId, targetUserId, {
+      requiredPermission: 'USER_ASSIGN',
+    });
+
+    const userAssignments = await userRepository.findAuthorityAssignmentsByUserId(targetUserId);
+    const existing = userAssignments.find((a) => a.id === assignmentId);
+    if (!existing) {
+      throw new NotFoundError('Authority assignment not found for this user');
+    }
+
+    // If activating, verify user holds the role and authority is active
+    if (input.status === 'ACTIVE') {
+      const hasRole = targetUser.roles.some((r) => r.name === 'COMPETENT_AUTHORITY');
+      if (!hasRole) {
+        throw new BadRequestError(
+          'Cannot activate assignment: user does not hold the COMPETENT_AUTHORITY role'
+        );
+      }
+      const authority = await competentAuthorityRepository.findAuthorityById(existing.authorityId);
+      if (!authority || authority.status !== 'ACTIVE') {
+        throw new BadRequestError('Cannot activate assignment: Competent Authority is not active');
+      }
+
+      // Check if user already has another ACTIVE assignment
+      const alreadyActive = userAssignments.find(
+        (a) => a.id !== assignmentId && a.status === 'ACTIVE'
+      );
+      if (alreadyActive) {
+        // Deactivate previous active assignment to avoid conflicting active assignments
+        await userRepository.updateAuthorityUserAssignment(alreadyActive.id, {
+          status: 'INACTIVE',
+          effectiveUntil: new Date().toISOString().slice(0, 10),
+        });
+      }
+    }
+
+    const effectiveUntil =
+      input.effectiveUntil !== undefined
+        ? input.effectiveUntil
+        : input.status === 'INACTIVE'
+        ? new Date().toISOString().slice(0, 10)
+        : null;
+
+    await userRepository.updateAuthorityUserAssignment(assignmentId, {
+      status: input.status,
+      effectiveUntil,
+    });
+
+    const refreshed = await userRepository.findAuthorityAssignmentsByUserId(targetUserId);
+    return refreshed.find((a) => a.id === assignmentId) ?? null;
   }
 }
 

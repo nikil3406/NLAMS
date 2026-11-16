@@ -6,11 +6,23 @@ import type { Role } from '../../../../../db/schema/roles';
 import type { AdministrativeUnit } from '../../../../../db/schema/administrative-units';
 import type { UserWithDetails } from '../../../../repositories/user.repository';
 
+interface CompetentAuthorityOption {
+  id: string;
+  authorityCode: string;
+  authorityName: string;
+  designation: string;
+  authorityLevel: string;
+  status: string;
+  jurisdictions?: Array<{
+    state?: { name: string };
+    district?: { name: string } | null;
+  }>;
+}
+
 export function CreateUserClient() {
-
-
   const [roles, setRoles] = useState<Role[]>([]);
   const [units, setUnits] = useState<AdministrativeUnit[]>([]);
+  const [competentAuthorities, setCompetentAuthorities] = useState<CompetentAuthorityOption[]>([]);
   const [isLoadingMetadata, setIsLoadingMetadata] = useState(true);
 
   // Form State
@@ -19,6 +31,7 @@ export function CreateUserClient() {
   const [phone, setPhone] = useState('');
   const [roleId, setRoleId] = useState('');
   const [unitId, setUnitId] = useState('');
+  const [selectedAuthorityId, setSelectedAuthorityId] = useState('');
   const [customPassword, setCustomPassword] = useState('');
   const [autoGeneratePassword, setAutoGeneratePassword] = useState(true);
 
@@ -31,14 +44,15 @@ export function CreateUserClient() {
   } | null>(null);
   const [copiedPassword, setCopiedPassword] = useState(false);
 
-  // Fetch delegatable roles and accessible administrative units
+  // Fetch delegatable roles, accessible administrative units, and active competent authorities
   useEffect(() => {
     async function fetchFormOptions() {
       setIsLoadingMetadata(true);
       try {
-        const [rolesRes, unitsRes] = await Promise.all([
+        const [rolesRes, unitsRes, authsRes] = await Promise.all([
           fetch('/api/roles'),
           fetch('/api/administrative-units'),
+          fetch('/api/competent-authorities?status=ACTIVE&includeJurisdictions=true'),
         ]);
 
         if (rolesRes.ok) {
@@ -60,8 +74,18 @@ export function CreateUserClient() {
             }
           }
         }
+
+        if (authsRes.ok) {
+          const authsJson = await authsRes.json();
+          if (authsJson.success && Array.isArray(authsJson.data)) {
+            setCompetentAuthorities(authsJson.data);
+            if (authsJson.data.length > 0) {
+              setSelectedAuthorityId(authsJson.data[0].id);
+            }
+          }
+        }
       } catch {
-        setErrorMessage('Failed to load role and administrative unit choices.');
+        setErrorMessage('Failed to load role, administrative unit, or authority choices.');
       } finally {
         setIsLoadingMetadata(false);
       }
@@ -70,12 +94,19 @@ export function CreateUserClient() {
     fetchFormOptions();
   }, []);
 
+  const selectedRole = roles.find((r) => r.id === roleId);
+  const isCompetentAuthorityRole = selectedRole?.name === 'COMPETENT_AUTHORITY';
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
     setErrorMessage(null);
 
     try {
+      if (isCompetentAuthorityRole && !selectedAuthorityId) {
+        throw new Error('Please select a Competent Authority for this user.');
+      }
+
       const payload: Record<string, unknown> = {
         name: name.trim(),
         email: email.trim(),
@@ -83,6 +114,10 @@ export function CreateUserClient() {
         roleId,
         administrativeUnitId: unitId,
       };
+
+      if (isCompetentAuthorityRole) {
+        payload.competentAuthorityId = selectedAuthorityId;
+      }
 
       if (!autoGeneratePassword && customPassword.trim()) {
         payload.password = customPassword.trim();
@@ -309,6 +344,61 @@ export function CreateUserClient() {
                 Assignment is restricted to units within your authorized administrative scope.
               </span>
             </div>
+
+            {/* Conditional Competent Authority Selection Field */}
+            {isCompetentAuthorityRole && (
+              <div
+                className="form-group"
+                style={{
+                  background: 'rgba(20, 184, 166, 0.06)',
+                  border: '1px solid rgba(20, 184, 166, 0.3)',
+                  borderRadius: '8px',
+                  padding: '1.25rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.5rem',
+                }}
+              >
+                <label
+                  className="form-label"
+                  htmlFor="user-competent-authority"
+                  style={{ color: '#2dd4bf', fontWeight: 600, fontSize: '0.875rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                >
+                  <span>🏛️ Select Competent Authority</span>
+                  <span style={{ color: 'var(--status-danger)' }}>*</span>
+                </label>
+                <select
+                  id="user-competent-authority"
+                  className="search-input"
+                  style={{ paddingLeft: '1rem' }}
+                  required
+                  value={selectedAuthorityId}
+                  onChange={(e) => setSelectedAuthorityId(e.target.value)}
+                >
+                  <option value="">— Select an active Competent Authority —</option>
+                  {competentAuthorities.map((auth) => {
+                    const coverage =
+                      auth.jurisdictions && auth.jurisdictions.length > 0
+                        ? auth.jurisdictions
+                            .map((j) =>
+                              j.district?.name
+                                ? `${j.state?.name || ''} / ${j.district.name}`
+                                : j.state?.name || 'All state'
+                            )
+                            .join(', ')
+                        : 'Jurisdiction not configured';
+                    return (
+                      <option key={auth.id} value={auth.id}>
+                        [{auth.authorityLevel}] {auth.authorityName} ({auth.designation}) — {coverage}
+                      </option>
+                    );
+                  })}
+                </select>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                  Associates this user with the selected Competent Authority for acquisition proposal scrutiny and reviews. Only active authorities are selectable.
+                </span>
+              </div>
+            )}
 
             <div style={{ padding: '1rem', background: 'rgba(255, 255, 255, 0.02)', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.875rem', fontWeight: 600 }}>

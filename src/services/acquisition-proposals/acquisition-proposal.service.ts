@@ -834,11 +834,14 @@ export class AcquisitionProposalService {
 
         let isAssignedToAuthority = false;
         if (selectedAuthId) {
-          isAssignedToAuthority =
-            await competentAuthorityRepository.hasActiveAssignment(
-              userId,
-              selectedAuthId
-            );
+          const hasCARole = await permissionService.hasRole(userId, 'COMPETENT_AUTHORITY');
+          if (hasCARole || isSuper) {
+            isAssignedToAuthority =
+              await competentAuthorityRepository.hasActiveAssignment(
+                userId,
+                selectedAuthId
+              );
+          }
         }
 
         if (!isAssignedToAuthority) {
@@ -1042,6 +1045,15 @@ export class AcquisitionProposalService {
       authorityLevel: string;
     }>;
   }> {
+    // 0. Dual check: Caller must hold COMPETENT_AUTHORITY role (or SUPER_ADMIN)
+    const isSuper = await permissionService.isSuperAdmin(userId);
+    const hasCARole = await permissionService.hasRole(userId, 'COMPETENT_AUTHORITY');
+    if (!isSuper && !hasCARole) {
+      throw new ForbiddenError(
+        'Forbidden: You do not possess the COMPETENT_AUTHORITY role.'
+      );
+    }
+
     // 1. Fetch user's active authority assignments
     const activeAuthorities =
       await competentAuthorityRepository.findActiveAuthoritiesForUser(userId);

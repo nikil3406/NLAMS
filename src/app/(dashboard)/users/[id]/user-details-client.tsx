@@ -75,6 +75,21 @@ export function UserDetailsClient({
   const [isRevokingRole, setIsRevokingRole] = useState(false);
   const [revokeRoleError, setRevokeRoleError] = useState<string | null>(null);
 
+  // Competent Authority Assignment State
+  const [competentAuthoritiesList, setCompetentAuthoritiesList] = useState<
+    Array<{
+      id: string;
+      authorityCode: string;
+      authorityName: string;
+      designation: string;
+      authorityLevel: string;
+    }>
+  >([]);
+  const [isAssignAuthorityOpen, setIsAssignAuthorityOpen] = useState(false);
+  const [selectedAuthorityIdToAssign, setSelectedAuthorityIdToAssign] = useState('');
+  const [isSavingAuthorityAssignment, setIsSavingAuthorityAssignment] = useState(false);
+  const [authorityAssignmentError, setAuthorityAssignmentError] = useState<string | null>(null);
+
   // Fetch User Details
   const loadUserDetails = useCallback(async () => {
     setIsLoading(true);
@@ -124,12 +139,24 @@ export function UserDetailsClient({
         }
 
         if (canAssignUnit) {
-          const res = await fetch('/api/administrative-units');
-          if (res.ok) {
-            const json = await res.json();
+          const [unitsRes, authsRes] = await Promise.all([
+            fetch('/api/administrative-units'),
+            fetch('/api/competent-authorities?status=ACTIVE'),
+          ]);
+          if (unitsRes.ok) {
+            const json = await unitsRes.json();
             if (json.success) {
               setAccessibleUnits(json.data);
               if (json.data.length > 0) setSelectedUnitId(json.data[0].id);
+            }
+          }
+          if (authsRes.ok) {
+            const authsJson = await authsRes.json();
+            if (authsJson.success && Array.isArray(authsJson.data)) {
+              setCompetentAuthoritiesList(authsJson.data);
+              if (authsJson.data.length > 0) {
+                setSelectedAuthorityIdToAssign(authsJson.data[0].id);
+              }
             }
           }
         }
@@ -140,6 +167,64 @@ export function UserDetailsClient({
 
     loadOptions();
   }, [canAssignRole, canAssignUnit]);
+
+  // Handle Assign Competent Authority
+  const handleAssignAuthority = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingAuthorityAssignment(true);
+    setAuthorityAssignmentError(null);
+    try {
+      if (!selectedAuthorityIdToAssign) {
+        throw new Error('Please select a Competent Authority');
+      }
+      const res = await fetch(`/api/users/${userId}/authority-assignments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ authorityId: selectedAuthorityIdToAssign }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || 'Failed to assign Competent Authority');
+      }
+      setSuccessMessage('Competent Authority assigned successfully.');
+      setIsAssignAuthorityOpen(false);
+      await loadUserDetails();
+    } catch (err) {
+      setAuthorityAssignmentError(
+        err instanceof Error ? err.message : 'Failed to assign authority'
+      );
+    } finally {
+      setIsSavingAuthorityAssignment(false);
+    }
+  };
+
+  // Handle Toggle Authority Status (Active <-> Inactive)
+  const handleToggleAuthorityStatus = async (
+    assignmentId: string,
+    currentStatus: 'ACTIVE' | 'INACTIVE'
+  ) => {
+    try {
+      const nextStatus = currentStatus === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+      const res = await fetch(
+        `/api/users/${userId}/authority-assignments/${assignmentId}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: nextStatus }),
+        }
+      );
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || 'Failed to update authority assignment');
+      }
+      setSuccessMessage(`Authority assignment set to ${nextStatus}.`);
+      await loadUserDetails();
+    } catch (err) {
+      setErrorMessage(
+        err instanceof Error ? err.message : 'Failed to update assignment status'
+      );
+    }
+  };
 
   // 1. Submit Account Status Update
   const handleUpdateStatusSubmit = async (e: React.FormEvent) => {
@@ -577,6 +662,101 @@ export function UserDetailsClient({
               </div>
             )}
           </div>
+
+          {/* Competent Authority Assignments Card */}
+          {(user.roles.some((r) => r.name === 'COMPETENT_AUTHORITY') ||
+            (user.authorityAssignments && user.authorityAssignments.length > 0)) && (
+            <div
+              className="user-sub-card"
+              style={{
+                border: '1px solid rgba(20, 184, 166, 0.3)',
+                background: 'rgba(20, 184, 166, 0.03)',
+              }}
+            >
+              <div className="card-header-flex">
+                <div>
+                  <h3 className="card-heading-title" style={{ color: '#2dd4bf' }}>
+                    🏛️ Competent Authority Assignments
+                  </h3>
+                  <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
+                    Jurisdiction and scrutiny assignments governing which acquisition proposals this officer oversees.
+                  </p>
+                </div>
+
+                {canAssignUnit && competentAuthoritiesList.length > 0 && (
+                  <button
+                    type="button"
+                    className="btn-accent"
+                    onClick={() => {
+                      setAuthorityAssignmentError(null);
+                      setIsAssignAuthorityOpen(true);
+                    }}
+                    id="btn-open-assign-authority"
+                    style={{ background: '#0d9488', borderColor: '#14b8a6' }}
+                  >
+                    + Assign / Switch Authority
+                  </button>
+                )}
+              </div>
+
+              {(!user.authorityAssignments || user.authorityAssignments.length === 0) ? (
+                <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
+                  No Competent Authority assigned to this user yet.
+                </p>
+              ) : (
+                <div className="items-list-group">
+                  {user.authorityAssignments.map((authAssign) => (
+                    <div
+                      key={authAssign.id}
+                      className="item-row-card"
+                      id={`auth-assignment-item-${authAssign.id}`}
+                      style={{
+                        borderColor:
+                          authAssign.status === 'ACTIVE'
+                            ? 'rgba(20, 184, 166, 0.4)'
+                            : 'var(--border-subtle)',
+                      }}
+                    >
+                      <div className="item-row-info">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <span className="item-row-title" style={{ color: '#fff' }}>
+                            {authAssign.authorityName}
+                          </span>
+                          <span
+                            className={`badge-status ${
+                              authAssign.status === 'ACTIVE' ? 'active' : 'inactive'
+                            }`}
+                          >
+                            {authAssign.status}
+                          </span>
+                        </div>
+                        <span className="item-row-subtitle">
+                          Code: {authAssign.authorityCode} • Designation: {authAssign.designation} • Level: {authAssign.authorityLevel}
+                        </span>
+                        <span style={{ fontSize: '0.6875rem', color: 'var(--text-muted)' }}>
+                          Effective: {authAssign.effectiveFrom} {authAssign.effectiveUntil ? `to ${authAssign.effectiveUntil}` : '(Ongoing)'}
+                        </span>
+                      </div>
+
+                      {canAssignUnit && (
+                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                          <button
+                            type="button"
+                            className={authAssign.status === 'ACTIVE' ? 'btn-danger-sm' : 'btn-secondary'}
+                            style={{ padding: '0.25rem 0.625rem', fontSize: '0.75rem' }}
+                            onClick={() => handleToggleAuthorityStatus(authAssign.id, authAssign.status)}
+                            id={`btn-toggle-authority-${authAssign.id}`}
+                          >
+                            {authAssign.status === 'ACTIVE' ? 'Deactivate' : 'Reactivate'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -928,6 +1108,79 @@ export function UserDetailsClient({
                   id="btn-confirm-save-assignment"
                 >
                   {isSavingAssignment ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Assign / Switch Competent Authority */}
+      {isAssignAuthorityOpen && (
+        <div className="modal-backdrop">
+          <div className="modal-card">
+            <div className="modal-header">
+              <h2 className="modal-title">Assign Competent Authority</h2>
+              <button
+                type="button"
+                className="modal-close-btn"
+                onClick={() => setIsAssignAuthorityOpen(false)}
+              >
+                ✕
+              </button>
+            </div>
+
+            {authorityAssignmentError && (
+              <div className="modal-alert-error">{authorityAssignmentError}</div>
+            )}
+
+            <form onSubmit={handleAssignAuthority} className="modal-form">
+              <div className="form-group">
+                <label className="form-label" htmlFor="select-competent-authority-modal">
+                  Select Competent Authority <span style={{ color: 'var(--status-danger)' }}>*</span>
+                </label>
+                <select
+                  id="select-competent-authority-modal"
+                  className="search-input"
+                  style={{ paddingLeft: '1rem' }}
+                  required
+                  value={selectedAuthorityIdToAssign}
+                  onChange={(e) => setSelectedAuthorityIdToAssign(e.target.value)}
+                >
+                  <option value="">— Select an active Competent Authority —</option>
+                  {competentAuthoritiesList.map((auth) => (
+                    <option key={auth.id} value={auth.id}>
+                      [{auth.authorityLevel}] {auth.authorityName} ({auth.designation})
+                    </option>
+                  ))}
+                </select>
+                <span
+                  style={{
+                    fontSize: '0.6875rem',
+                    color: 'var(--text-muted)',
+                    marginTop: '0.25rem',
+                    display: 'block',
+                  }}
+                >
+                  Assigning a new authority preserves historical assignment records and marks previous active assignments as inactive.
+                </span>
+              </div>
+
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn-cancel"
+                  onClick={() => setIsAssignAuthorityOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  disabled={isSavingAuthorityAssignment}
+                  id="btn-confirm-assign-authority"
+                >
+                  {isSavingAuthorityAssignment ? 'Saving...' : 'Assign Authority'}
                 </button>
               </div>
             </form>

@@ -204,6 +204,11 @@ export class UserRoleService {
     // 8. Execute revocation
     await roleRepository.revokeRoleFromUser(targetUserId, roleId);
 
+    // If COMPETENT_AUTHORITY role is revoked, deactivate active authority assignments
+    if (role.name === 'COMPETENT_AUTHORITY') {
+      await userRepository.deactivateActiveAuthorityAssignmentsForUser(targetUserId);
+    }
+
     // 9. Return updated user
     const updated = await userRepository.findUserDetailsById(targetUserId);
     if (!updated) {

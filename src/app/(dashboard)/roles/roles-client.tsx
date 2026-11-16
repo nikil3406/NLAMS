@@ -50,11 +50,12 @@ const PERMISSION_CATEGORIES: Record<string, string[]> = {
 
 
 const ROLE_COLOR_MAP: Record<string, { bg: string; border: string; text: string }> = {
-  SUPER_ADMIN:     { bg: 'rgba(239,68,68,0.12)',   border: 'rgba(239,68,68,0.35)',   text: '#f87171' },
-  MINISTRY_ADMIN:  { bg: 'rgba(245,158,11,0.12)',  border: 'rgba(245,158,11,0.35)',  text: '#fbbf24' },
-  PROJECT_OFFICER: { bg: 'rgba(59,130,246,0.12)',  border: 'rgba(59,130,246,0.35)',  text: '#60a5fa' },
-  LAND_OFFICER:    { bg: 'rgba(16,185,129,0.12)',  border: 'rgba(16,185,129,0.35)', text: '#6ee7b7' },
-  FIELD_OFFICER:   { bg: 'rgba(139,92,246,0.12)', border: 'rgba(139,92,246,0.35)', text: '#c4b5fd' },
+  SUPER_ADMIN:         { bg: 'rgba(239,68,68,0.12)',   border: 'rgba(239,68,68,0.35)',   text: '#f87171' },
+  MINISTRY_ADMIN:      { bg: 'rgba(245,158,11,0.12)',  border: 'rgba(245,158,11,0.35)',  text: '#fbbf24' },
+  COMPETENT_AUTHORITY: { bg: 'rgba(20,184,166,0.12)',  border: 'rgba(20,184,166,0.35)',  text: '#2dd4bf' },
+  PROJECT_OFFICER:     { bg: 'rgba(59,130,246,0.12)',  border: 'rgba(59,130,246,0.35)',  text: '#60a5fa' },
+  LAND_OFFICER:        { bg: 'rgba(16,185,129,0.12)',  border: 'rgba(16,185,129,0.35)', text: '#6ee7b7' },
+  FIELD_OFFICER:       { bg: 'rgba(139,92,246,0.12)', border: 'rgba(139,92,246,0.35)', text: '#c4b5fd' },
 };
 
 const DEFAULT_ROLE_STYLE = { bg: 'rgba(100,116,139,0.12)', border: 'rgba(100,116,139,0.35)', text: '#94a3b8' };

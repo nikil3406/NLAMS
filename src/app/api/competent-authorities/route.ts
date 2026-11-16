@@ -24,6 +24,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const level = searchParams.get('level') ?? undefined;
     const limit = searchParams.get('limit') ? parseInt(searchParams.get('limit')!, 10) : undefined;
     const offset = searchParams.get('offset') ? parseInt(searchParams.get('offset')!, 10) : undefined;
+    const includeJurisdictions = searchParams.get('includeJurisdictions') === 'true';
 
     const result = await competentAuthorityService.listAuthorities({
       search,
@@ -31,6 +32,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       level,
       limit,
       offset,
+      includeJurisdictions,
     });
 
     return NextResponse.json(

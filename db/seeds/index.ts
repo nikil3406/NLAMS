@@ -62,11 +62,12 @@ const db = drizzle(client, { schema });
 // ----------------------------------------------------------------
 
 const ROLES = [
-  { name: 'SUPER_ADMIN',     description: 'Full system access — all permissions', isSystemRole: true },
-  { name: 'MINISTRY_ADMIN',  description: 'Ministry-level administration', isSystemRole: true },
-  { name: 'PROJECT_OFFICER', description: 'Project management and oversight', isSystemRole: true },
-  { name: 'LAND_OFFICER',    description: 'Land record and assessment management', isSystemRole: true },
-  { name: 'FIELD_OFFICER',   description: 'Field operations and data collection', isSystemRole: true },
+  { name: 'SUPER_ADMIN',         description: 'Full system access — all permissions', isSystemRole: true },
+  { name: 'MINISTRY_ADMIN',      description: 'Ministry-level administration', isSystemRole: true },
+  { name: 'COMPETENT_AUTHORITY', description: 'Competent Authority designated for acquisition proposal scrutiny and decisions', isSystemRole: true },
+  { name: 'PROJECT_OFFICER',     description: 'Project management and oversight', isSystemRole: true },
+  { name: 'LAND_OFFICER',        description: 'Land record and assessment management', isSystemRole: true },
+  { name: 'FIELD_OFFICER',       description: 'Field operations and data collection', isSystemRole: true },
 ] as const;
 
 const PERMISSIONS = [
@@ -109,6 +110,9 @@ const ROLE_PERMISSIONS: Record<string, PermissionName[]> = {
     'PROJECT_VIEW', 'PROJECT_CREATE', 'PROJECT_UPDATE', 'PROJECT_REGISTER',
     'ACQUISITION_CASE_VIEW', 'ACQUISITION_CASE_CREATE', 'ACQUISITION_CASE_UPDATE', 'ACQUISITION_CASE_SUBMIT',
     'ACQUISITION_CASE_REVIEW', 'FIELD_VERIFICATION_AUTHORIZE',
+  ],
+  COMPETENT_AUTHORITY: [
+    'USER_VIEW', 'ADMIN_UNIT_VIEW', 'PROJECT_VIEW', 'ACQUISITION_CASE_VIEW',
   ],
   PROJECT_OFFICER: [
     'USER_VIEW', 'ROLE_VIEW', 'ADMIN_UNIT_VIEW',

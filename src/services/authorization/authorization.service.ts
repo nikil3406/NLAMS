@@ -12,6 +12,7 @@ import { sanitizeUser } from '../auth/session.service';
 export const ROLE_AUTHORITY_WEIGHT: Record<string, number> = {
   SUPER_ADMIN: 100,
   MINISTRY_ADMIN: 80,
+  COMPETENT_AUTHORITY: 70,
   PROJECT_OFFICER: 60,
   LAND_OFFICER: 40,
   FIELD_OFFICER: 20,

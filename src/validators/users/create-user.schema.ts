@@ -25,6 +25,11 @@ export const createUserSchema = z.object({
   administrativeUnitId: z
     .string({ required_error: 'Administrative unit is required' })
     .uuid('Invalid administrative unit ID format'),
+  competentAuthorityId: z
+    .string()
+    .uuid('Invalid Competent Authority ID format')
+    .optional()
+    .nullable(),
   password: z
     .string()
     .min(8, 'Password must be at least 8 characters')

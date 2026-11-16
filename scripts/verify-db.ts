@@ -147,7 +147,7 @@ async function verify() {
 
   // 6. Seed roles
   console.log('\n  Seed roles:');
-  const EXPECTED_ROLES = ['SUPER_ADMIN','MINISTRY_ADMIN','PROJECT_OFFICER','LAND_OFFICER','FIELD_OFFICER'];
+  const EXPECTED_ROLES = ['SUPER_ADMIN','MINISTRY_ADMIN','COMPETENT_AUTHORITY','PROJECT_OFFICER','LAND_OFFICER','FIELD_OFFICER'];
   const roleRows = await client`SELECT name FROM roles WHERE name = ANY(${EXPECTED_ROLES})`;
   const foundRoles = new Set(roleRows.map((r) => r.name));
   for (const r of EXPECTED_ROLES) {

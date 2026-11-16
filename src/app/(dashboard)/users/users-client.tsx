@@ -291,6 +291,7 @@ export function UsersClient({
               <tbody>
                 {users.map((u) => {
                   const activeAssignment = u.assignments.find((a) => a.status === 'ACTIVE');
+                  const activeAuthAssignment = u.authorityAssignments?.find((a) => a.status === 'ACTIVE');
                   return (
                     <tr key={u.id} id={`user-row-${u.id}`}>
                       <td>
@@ -325,6 +326,27 @@ export function UsersClient({
                             </span>
                           ))}
                         </div>
+                        {activeAuthAssignment && (
+                          <div style={{ marginTop: '0.375rem' }}>
+                            <span
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.25rem',
+                                padding: '0.125rem 0.5rem',
+                                borderRadius: '4px',
+                                fontSize: '0.6875rem',
+                                background: 'rgba(20, 184, 166, 0.12)',
+                                color: '#2dd4bf',
+                                border: '1px solid rgba(20, 184, 166, 0.3)',
+                                fontWeight: 600,
+                              }}
+                              title={`Designation: ${activeAuthAssignment.designation} (${activeAuthAssignment.authorityLevel})`}
+                            >
+                              ⚖️ {activeAuthAssignment.authorityName}
+                            </span>
+                          </div>
+                        )}
                       </td>
                       <td>
                         {activeAssignment ? (
@@ -334,6 +356,20 @@ export function UsersClient({
                             </span>
                             <span style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', marginLeft: '0.25rem' }}>
                               {activeAssignment.administrativeUnitCode} • {activeAssignment.administrativeUnitType}
+                            </span>
+                            {activeAuthAssignment && (
+                              <span style={{ fontSize: '0.6875rem', color: '#2dd4bf', marginLeft: '0.25rem', marginTop: '0.125rem' }}>
+                                Designation: {activeAuthAssignment.designation}
+                              </span>
+                            )}
+                          </div>
+                        ) : activeAuthAssignment ? (
+                          <div style={{ display: 'flex', flexDirection: 'column' }}>
+                            <span style={{ fontSize: '0.75rem', color: '#2dd4bf', fontWeight: 600 }}>
+                              ⚖️ {activeAuthAssignment.authorityName}
+                            </span>
+                            <span style={{ fontSize: '0.6875rem', color: 'var(--text-muted)' }}>
+                              {activeAuthAssignment.designation} ({activeAuthAssignment.authorityLevel})
                             </span>
                           </div>
                         ) : (

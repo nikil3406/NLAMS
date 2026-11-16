@@ -365,6 +365,16 @@ describe('NLAMS – Step 3B: Unified Proposal Validation, Submission & Competent
     unrelatedOfficerId = await makeUser('Unrelated Officer', 'unrel.3b');
     unrelatedOfficerCookie = await makeSession(unrelatedOfficerId);
 
+    // Assign COMPETENT_AUTHORITY role if present in system
+    const caRoleId = roleMap.get('COMPETENT_AUTHORITY');
+    if (caRoleId) {
+      await db.insert(userRoles).values([
+        { userId: authorityOfficer1Id, roleId: caRoleId, assignedBy: superAdminId },
+        { userId: authorityOfficer2Id, roleId: caRoleId, assignedBy: superAdminId },
+        { userId: unrelatedOfficerId, roleId: caRoleId, assignedBy: superAdminId },
+      ]);
+    }
+
     // 3. Implementing Agency & Project
     const [agency] = await db.select().from(implementingAgencies).limit(1);
     agencyId = agency.id;

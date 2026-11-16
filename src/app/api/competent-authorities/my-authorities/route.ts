@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { getCurrentUser } from '../../../../lib/auth';
 import { handleApiError } from '../../../../lib/api-response';
 import { competentAuthorityRepository } from '../../../../repositories/competent-authority.repository';
+import { permissionService } from '../../../../services/authorization/permission.service';
 
 /**
  * GET /api/competent-authorities/my-authorities
@@ -15,6 +16,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       return NextResponse.json(
         { success: false, error: 'Unauthorized' },
         { status: 401 }
+      );
+    }
+
+    const isSuper = await permissionService.isSuperAdmin(user.id);
+    const hasCARole = await permissionService.hasRole(user.id, 'COMPETENT_AUTHORITY');
+    if (!isSuper && !hasCARole) {
+      return NextResponse.json(
+        { success: true, data: [] },
+        { status: 200 }
       );
     }
 

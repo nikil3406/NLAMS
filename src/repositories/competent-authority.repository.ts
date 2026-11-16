@@ -25,6 +25,7 @@ export interface AuthorityFilterOptions {
   search?: string;
   limit?: number;
   offset?: number;
+  includeJurisdictions?: boolean;
 }
 
 export interface AuthorityJurisdictionWithUnits extends AuthorityJurisdiction {
