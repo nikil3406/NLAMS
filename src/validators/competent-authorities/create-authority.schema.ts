@@ -1,5 +1,21 @@
 import { z } from 'zod';
 
+export const COMPETENT_AUTHORITY_DESIGNATIONS = [
+  'District Collector',
+  'Deputy Commissioner',
+  'Special Land Acquisition Officer (SLAO)',
+  'Land Acquisition Officer (LAO)',
+  'Additional District Magistrate (ADM)',
+  'Sub-Divisional Magistrate (SDM)',
+  'Divisional Commissioner',
+  'Designated State Government Authority',
+  'Designated Central Government Authority',
+  'Special Deputy Collector (Land Acquisition)',
+] as const;
+
+export type CompetentAuthorityDesignation =
+  (typeof COMPETENT_AUTHORITY_DESIGNATIONS)[number];
+
 export const createAuthoritySchema = z
   .object({
     authorityCode: z
@@ -12,11 +28,11 @@ export const createAuthoritySchema = z
       .trim()
       .min(2, { message: 'Authority name must be at least 2 characters' })
       .max(255, { message: 'Authority name must not exceed 255 characters' }),
-    designation: z
-      .string()
-      .trim()
-      .min(2, { message: 'Designation must be at least 2 characters' })
-      .max(255, { message: 'Designation must not exceed 255 characters' }),
+    designation: z.enum(COMPETENT_AUTHORITY_DESIGNATIONS, {
+      errorMap: () => ({
+        message: 'Invalid designation. Must be one of the supported Competent Authority designations',
+      }),
+    }),
     authorityLevel: z.enum(['DISTRICT', 'REGIONAL', 'STATE', 'CENTRAL'], {
       errorMap: () => ({
         message: 'Authority level must be DISTRICT, REGIONAL, STATE, or CENTRAL',

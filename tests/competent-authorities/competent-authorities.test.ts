@@ -550,7 +550,7 @@ describe('NLAMS – Step 3A: Competent Authority Foundation', () => {
         body: JSON.stringify({
           authorityCode: `CA-DC-BLR-${ts}`, // Duplicate code
           authorityName: `Duplicate DC ${ts}`,
-          designation: 'Special DC',
+          designation: 'District Collector',
           authorityLevel: 'DISTRICT',
           effectiveFrom: '2026-01-01',
         }),
@@ -611,7 +611,7 @@ describe('NLAMS – Step 3A: Competent Authority Foundation', () => {
           Cookie: superAdminCookie,
         },
         body: JSON.stringify({
-          designation: 'Special District Collector & Competent Authority',
+          designation: 'Special Deputy Collector (Land Acquisition)',
           effectiveUntil: '2028-12-31',
         }),
       });
@@ -622,7 +622,7 @@ describe('NLAMS – Step 3A: Competent Authority Foundation', () => {
       assert.strictEqual(res.status, 200);
       const json = await res.json();
       assert.strictEqual(json.success, true);
-      assert.strictEqual(json.data.designation, 'Special District Collector & Competent Authority');
+      assert.strictEqual(json.data.designation, 'Special Deputy Collector (Land Acquisition)');
       assert.strictEqual(json.data.effectiveUntil, '2028-12-31');
     });
 
@@ -975,7 +975,7 @@ describe('NLAMS – Step 3A: Competent Authority Foundation', () => {
         {
           authorityCode: `CA-STATE-DISC-${ts}`,
           authorityName: `Karnataka Land Acquisition Appellate Authority ${ts}`,
-          designation: 'State Competent Authority',
+          designation: 'Designated State Government Authority',
           authorityLevel: 'STATE',
           status: 'ACTIVE',
           effectiveFrom: '2026-01-01',
@@ -1055,16 +1055,19 @@ describe('NLAMS – Step 3A: Competent Authority Foundation', () => {
     });
 
     it('4.3 Uncovered Multi-District Case: Returns empty list with administrative resolution notice', async () => {
-      // Temporarily deactivate jurisdictions of DivComm and State Authority
-      await db
-        .update(authorityJurisdictions)
-        .set({ status: 'INACTIVE' })
-        .where(
-          inArray(authorityJurisdictions.authorityId, [
-            divCommBangaloreId,
-            stateAuthorityId,
-          ])
-        );
+      // Temporarily deactivate active jurisdictions to test uncovered multi-district scenario
+      const activeJurs = await db
+        .select({ id: authorityJurisdictions.id })
+        .from(authorityJurisdictions)
+        .where(eq(authorityJurisdictions.status, 'ACTIVE'));
+      const activeJurIds = activeJurs.map((j) => j.id);
+
+      if (activeJurIds.length > 0) {
+        await db
+          .update(authorityJurisdictions)
+          .set({ status: 'INACTIVE' })
+          .where(inArray(authorityJurisdictions.id, activeJurIds));
+      }
 
       const result = await competentAuthorityService.getEligibleAuthoritiesForCase(multiDistrictCaseId);
       assert.strictEqual(result.authorities.length, 0);
@@ -1075,15 +1078,12 @@ describe('NLAMS – Step 3A: Competent Authority Foundation', () => {
       );
 
       // Re-activate jurisdictions for subsequent tests
-      await db
-        .update(authorityJurisdictions)
-        .set({ status: 'ACTIVE' })
-        .where(
-          inArray(authorityJurisdictions.authorityId, [
-            divCommBangaloreId,
-            stateAuthorityId,
-          ])
-        );
+      if (activeJurIds.length > 0) {
+        await db
+          .update(authorityJurisdictions)
+          .set({ status: 'ACTIVE' })
+          .where(inArray(authorityJurisdictions.id, activeJurIds));
+      }
     });
   });
 
@@ -1257,7 +1257,7 @@ describe('NLAMS – Step 3A: Competent Authority Foundation', () => {
         {
           authorityCode: `CA-STATE-UPD-${ts}`,
           authorityName: `State Authority Update ${ts}`,
-          designation: 'State Commissioner',
+          designation: 'Designated State Government Authority',
           authorityLevel: 'STATE',
           status: 'ACTIVE',
           effectiveFrom: '2026-01-01',

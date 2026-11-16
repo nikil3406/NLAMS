@@ -23,6 +23,7 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import { hash } from '@node-rs/argon2';
 import * as schema from '../schema/index.js';
 import { seedImplementingAgencies } from './implementing-agencies.js';
+import { seedCompetentAuthorities } from './competent-authorities.js';
 
 // ----------------------------------------------------------------
 // Load .env.local manually (tsx does not auto-load it)
@@ -274,6 +275,13 @@ async function seed() {
   const agencyStats = await seedImplementingAgencies(db);
   console.log(
     `  Summary: ${agencyStats.inserted} inserted, ${agencyStats.updated} updated, ${agencyStats.unchanged} unchanged, ${agencyStats.skipped} skipped.`
+  );
+
+  // 7. Statutory Competent Authorities
+  console.log('\n📌 Seeding statutory competent authorities...');
+  const caStats = await seedCompetentAuthorities(db);
+  console.log(
+    `  Summary: ${caStats.inserted} inserted, ${caStats.updated} updated, ${caStats.skipped} skipped.`
   );
 
   console.log('\n✅ Seed completed successfully.\n');

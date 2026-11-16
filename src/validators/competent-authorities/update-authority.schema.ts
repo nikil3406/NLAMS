@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { COMPETENT_AUTHORITY_DESIGNATIONS } from './create-authority.schema';
 
 export const updateAuthoritySchema = z
   .object({
@@ -9,10 +10,11 @@ export const updateAuthoritySchema = z
       .max(255, { message: 'Authority name must not exceed 255 characters' })
       .optional(),
     designation: z
-      .string()
-      .trim()
-      .min(2, { message: 'Designation must be at least 2 characters' })
-      .max(255, { message: 'Designation must not exceed 255 characters' })
+      .enum(COMPETENT_AUTHORITY_DESIGNATIONS, {
+        errorMap: () => ({
+          message: 'Invalid designation. Must be one of the supported Competent Authority designations',
+        }),
+      })
       .optional(),
     authorityLevel: z
       .enum(['DISTRICT', 'REGIONAL', 'STATE', 'CENTRAL'])

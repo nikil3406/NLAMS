@@ -29,6 +29,25 @@ export type AuthorityLevel = (typeof AUTHORITY_LEVELS)[number];
 export const AUTHORITY_STATUSES = ['ACTIVE', 'INACTIVE'] as const;
 export type AuthorityStatus = (typeof AUTHORITY_STATUSES)[number];
 
+/**
+ * Predefined supported Competent Authority designations.
+ */
+export const COMPETENT_AUTHORITY_DESIGNATIONS = [
+  'District Collector',
+  'Deputy Commissioner',
+  'Special Land Acquisition Officer (SLAO)',
+  'Land Acquisition Officer (LAO)',
+  'Additional District Magistrate (ADM)',
+  'Sub-Divisional Magistrate (SDM)',
+  'Divisional Commissioner',
+  'Designated State Government Authority',
+  'Designated Central Government Authority',
+  'Special Deputy Collector (Land Acquisition)',
+] as const;
+
+export type CompetentAuthorityDesignation =
+  (typeof COMPETENT_AUTHORITY_DESIGNATIONS)[number];
+
 export const PROPOSAL_AUTHORITY_ASSIGNMENT_STATUSES = [
   'ACTIVE',
   'SUPERSEDED',
