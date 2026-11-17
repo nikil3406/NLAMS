@@ -3,7 +3,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import type { ProposalWithDetails } from '../../../../repositories/acquisition-proposal.repository';
-import type { ProposalStatus } from '../../../../../db/schema/acquisition-proposals';
+import type {
+  ProposalStatus,
+  ObservationCategory,
+  ScrutinyDecisionType,
+} from '../../../../../db/schema/acquisition-proposals';
+import { OBSERVATION_CATEGORIES } from '../../../../../db/schema/acquisition-proposals';
 import type { ProposalValidationReport } from '../../../../services/acquisition-proposals/proposal-validation.service';
 
 interface ProposalDetailClientProps {
@@ -55,10 +60,95 @@ const STATUS_BADGE_STYLES: Record<
   },
 };
 
+const OBSERVATION_CATEGORY_META: Record<
+  string,
+  { label: string; color: string; bg: string; border: string }
+> = {
+  PROJECT_JUSTIFICATION: {
+    label: 'Project Justification',
+    color: '#60a5fa',
+    bg: 'rgba(59, 130, 246, 0.15)',
+    border: 'rgba(59, 130, 246, 0.3)',
+  },
+  LAND_REQUIREMENT: {
+    label: 'Land Requirement',
+    color: '#f59e0b',
+    bg: 'rgba(245, 158, 11, 0.15)',
+    border: 'rgba(245, 158, 11, 0.3)',
+  },
+  LAND_RECORDS: {
+    label: 'Land Records',
+    color: '#10b981',
+    bg: 'rgba(16, 185, 129, 0.15)',
+    border: 'rgba(16, 185, 129, 0.3)',
+  },
+  PARCEL_DETAILS: {
+    label: 'Parcel Details',
+    color: '#06b6d4',
+    bg: 'rgba(6, 182, 212, 0.15)',
+    border: 'rgba(6, 182, 212, 0.3)',
+  },
+  DOCUMENTATION: {
+    label: 'Documentation',
+    color: '#a855f7',
+    bg: 'rgba(168, 85, 247, 0.15)',
+    border: 'rgba(168, 85, 247, 0.3)',
+  },
+  FINANCIAL_INFORMATION: {
+    label: 'Financial Information',
+    color: '#ec4899',
+    bg: 'rgba(236, 72, 153, 0.15)',
+    border: 'rgba(236, 72, 153, 0.3)',
+  },
+  ADMINISTRATIVE_REQUIREMENTS: {
+    label: 'Administrative Requirements',
+    color: '#8b5cf6',
+    bg: 'rgba(139, 92, 246, 0.15)',
+    border: 'rgba(139, 92, 246, 0.3)',
+  },
+  LEGAL_REQUIREMENTS: {
+    label: 'Legal Requirements',
+    color: '#ef4444',
+    bg: 'rgba(239, 68, 68, 0.15)',
+    border: 'rgba(239, 68, 68, 0.3)',
+  },
+  OTHER: {
+    label: 'Other',
+    color: '#94a3b8',
+    bg: 'rgba(148, 163, 184, 0.15)',
+    border: 'rgba(148, 163, 184, 0.3)',
+  },
+};
+
+const DECISION_META: Record<
+  string,
+  { label: string; color: string; bg: string; border: string }
+> = {
+  APPROVED: {
+    label: '✓ Approved',
+    color: '#10b981',
+    bg: 'rgba(16, 185, 129, 0.15)',
+    border: 'rgba(16, 185, 129, 0.3)',
+  },
+  CORRECTION_REQUESTED: {
+    label: '⚠️ Corrections Requested',
+    color: '#f59e0b',
+    bg: 'rgba(245, 158, 11, 0.15)',
+    border: 'rgba(245, 158, 11, 0.3)',
+  },
+  REJECTED: {
+    label: '✕ Rejected',
+    color: '#ef4444',
+    bg: 'rgba(239, 68, 68, 0.15)',
+    border: 'rgba(239, 68, 68, 0.3)',
+  },
+};
+
 export function ProposalDetailClient({
   proposalId,
   currentUserId,
   userRoles,
+  isSuperAdmin,
 }: ProposalDetailClientProps) {
   const isAgencyUser =
     userRoles.includes('IMPLEMENTING_AGENCY') ||
@@ -92,6 +182,29 @@ export function ProposalDetailClient({
   const [isMakingChanges, setIsMakingChanges] = useState(false);
   const [makeChangesRemarks, setMakeChangesRemarks] = useState('');
   const [makeChangesError, setMakeChangesError] = useState<string | null>(null);
+
+  // Step 3C: Scrutiny Review State
+  const [isStartingReview, setIsStartingReview] = useState(false);
+
+  // Scrutiny Observation Modal State
+  const [showObservationModal, setShowObservationModal] = useState(false);
+  const [obsCategory, setObsCategory] = useState<ObservationCategory>('PROJECT_JUSTIFICATION');
+  const [obsTitle, setObsTitle] = useState('');
+  const [obsDescription, setObsDescription] = useState('');
+  const [obsSection, setObsSection] = useState('');
+  const [isRecordingObs, setIsRecordingObs] = useState(false);
+  const [obsError, setObsError] = useState<string | null>(null);
+
+  // Scrutiny Decision Modal State
+  const [decisionModalType, setDecisionModalType] = useState<ScrutinyDecisionType | null>(null);
+  const [decisionRemarks, setDecisionRemarks] = useState('');
+  const [isRecordingDecision, setIsRecordingDecision] = useState(false);
+  const [decisionError, setDecisionError] = useState<string | null>(null);
+
+  // Verified Land Inventory Parcel Snapshots
+  const [inventorySnapshots, setInventorySnapshots] = useState<any[]>([]);
+  const [isLoadingSnapshots, setIsLoadingSnapshots] = useState(false);
+  const [showSnapshotsTable, setShowSnapshotsTable] = useState(false);
 
   const fetchProposal = useCallback(async () => {
     setIsLoading(true);
@@ -240,6 +353,115 @@ export function ProposalDetailClient({
     setViewingVersion(versionItem);
   };
 
+  // Step 3C: Start Scrutiny Review
+  const handleStartReview = async () => {
+    setIsStartingReview(true);
+    setErrorMessage(null);
+    try {
+      const res = await fetch(`/api/acquisition-proposals/${proposalId}/start-review`, {
+        method: 'POST',
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || 'Failed to start scrutiny review');
+      }
+      await fetchProposal();
+      await fetchVersions();
+    } catch (err: unknown) {
+      setErrorMessage(err instanceof Error ? err.message : 'Error starting review');
+    } finally {
+      setIsStartingReview(false);
+    }
+  };
+
+  // Step 3C: Record Scrutiny Observation
+  const handleRecordObservation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsRecordingObs(true);
+    setObsError(null);
+    try {
+      const res = await fetch(`/api/acquisition-proposals/${proposalId}/observations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          observationCategory: obsCategory,
+          observationTitle: obsTitle.trim(),
+          observationDescription: obsDescription.trim(),
+          relatedSection: obsSection.trim() || undefined,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || 'Failed to record observation');
+      }
+      setShowObservationModal(false);
+      setObsTitle('');
+      setObsDescription('');
+      setObsSection('');
+      await fetchProposal();
+    } catch (err: unknown) {
+      setObsError(err instanceof Error ? err.message : 'Error recording observation');
+    } finally {
+      setIsRecordingObs(false);
+    }
+  };
+
+  // Step 3C: Record Scrutiny Decision
+  const handleRecordDecision = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!decisionModalType) return;
+    setIsRecordingDecision(true);
+    setDecisionError(null);
+    try {
+      const res = await fetch(`/api/acquisition-proposals/${proposalId}/decisions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          decisionType: decisionModalType,
+          decisionRemarks: decisionRemarks.trim(),
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || 'Failed to record decision');
+      }
+      setDecisionModalType(null);
+      setDecisionRemarks('');
+      await fetchProposal();
+      await fetchVersions();
+    } catch (err: unknown) {
+      setDecisionError(err instanceof Error ? err.message : 'Error recording decision');
+    } finally {
+      setIsRecordingDecision(false);
+    }
+  };
+
+  // Step 3C: Toggle & Load Parcel Snapshots for Immutable Reference
+  const handleToggleSnapshots = async () => {
+    if (showSnapshotsTable) {
+      setShowSnapshotsTable(false);
+      return;
+    }
+    if (!proposal?.linkedInventory?.id) return;
+    setShowSnapshotsTable(true);
+    if (inventorySnapshots.length === 0) {
+      setIsLoadingSnapshots(true);
+      try {
+        const res = await fetch(`/api/verified-land-inventories/${proposal.linkedInventory.id}`);
+        if (res.ok) {
+          const json = await res.json();
+          if (json.success && json.data?.snapshots) {
+            setInventorySnapshots(json.data.snapshots);
+          }
+        }
+      } catch {
+        // non-fatal
+      } finally {
+        setIsLoadingSnapshots(false);
+      }
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="container" style={{ padding: '3rem', textAlign: 'center' }}>
@@ -281,12 +503,25 @@ export function ProposalDetailClient({
     proposal.createdBy === currentUserId ||
     proposal.currentVersion?.createdBy === currentUserId;
   const isDraft = proposal.currentStatus === 'DRAFT';
+  const isSubmitted = proposal.currentStatus === 'SUBMITTED';
+  const isUnderReview = proposal.currentStatus === 'UNDER_REVIEW';
   const isCorrectionRequested =
     proposal.currentStatus === 'CORRECTION_REQUESTED';
+  const isApproved = proposal.currentStatus === 'APPROVED';
+  const isRejected = proposal.currentStatus === 'REJECTED';
+  const isCompetentAuthorityUser =
+    userRoles.includes('COMPETENT_AUTHORITY') || isSuperAdmin;
+  const canScrutinize =
+    isCompetentAuthorityUser && (isSubmitted || isUnderReview);
   const isViewingCurrent =
     !selectedVersionId || selectedVersionId === proposal.currentVersionId;
 
   const version = viewingVersion || proposal.currentVersion;
+  const latestDecision =
+    proposal.decisions && proposal.decisions.length > 0
+      ? proposal.decisions[0]
+      : null;
+  const observationsList = proposal.observations || [];
 
   return (
     <div
@@ -465,6 +700,136 @@ export function ProposalDetailClient({
               Make Changes
             </button>
           )}
+
+          {/* Step 3C: Start Scrutiny Review Action (only if SUBMITTED and CA user) */}
+          {isSubmitted && isCompetentAuthorityUser && isViewingCurrent && (
+            <button
+              onClick={handleStartReview}
+              disabled={isStartingReview}
+              id="start-review-btn"
+              className="btn"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                padding: '0.45rem 1rem',
+                fontSize: '0.8125rem',
+                borderRadius: '0.375rem',
+                fontWeight: 600,
+                backgroundColor: '#0d9488',
+                color: '#fff',
+                border: 'none',
+                cursor: 'pointer',
+              }}
+            >
+              <span>⚖</span>
+              <span>{isStartingReview ? 'Starting...' : 'Start Scrutiny Review'}</span>
+            </button>
+          )}
+
+          {/* Step 3C: Under Review Actions (Observation & Decisions for CA user) */}
+          {isUnderReview && isCompetentAuthorityUser && isViewingCurrent && (
+            <>
+              <button
+                onClick={() => {
+                  setObsError(null);
+                  setShowObservationModal(true);
+                }}
+                id="add-observation-btn"
+                className="btn btn-secondary"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  padding: '0.45rem 0.9rem',
+                  fontSize: '0.8125rem',
+                  borderRadius: '0.375rem',
+                  fontWeight: 600,
+                }}
+              >
+                <span>📝</span>
+                <span>Add Observation</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setDecisionError(null);
+                  setDecisionRemarks('');
+                  setDecisionModalType('APPROVED');
+                }}
+                id="approve-proposal-btn"
+                className="btn"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  padding: '0.45rem 0.9rem',
+                  fontSize: '0.8125rem',
+                  borderRadius: '0.375rem',
+                  fontWeight: 600,
+                  backgroundColor: '#10b981',
+                  color: '#fff',
+                  border: 'none',
+                  cursor: 'pointer',
+                }}
+              >
+                <span>✓</span>
+                <span>Approve Proposal</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setDecisionError(null);
+                  setDecisionRemarks('');
+                  setDecisionModalType('CORRECTION_REQUESTED');
+                }}
+                id="request-corrections-btn"
+                className="btn"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  padding: '0.45rem 0.9rem',
+                  fontSize: '0.8125rem',
+                  borderRadius: '0.375rem',
+                  fontWeight: 600,
+                  backgroundColor: '#f59e0b',
+                  color: '#fff',
+                  border: 'none',
+                  cursor: 'pointer',
+                }}
+              >
+                <span>⚠️</span>
+                <span>Request Corrections</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setDecisionError(null);
+                  setDecisionRemarks('');
+                  setDecisionModalType('REJECTED');
+                }}
+                id="reject-proposal-btn"
+                className="btn"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  padding: '0.45rem 0.9rem',
+                  fontSize: '0.8125rem',
+                  borderRadius: '0.375rem',
+                  fontWeight: 600,
+                  backgroundColor: '#ef4444',
+                  color: '#fff',
+                  border: 'none',
+                  cursor: 'pointer',
+                }}
+              >
+                <span>✕</span>
+                <span>Reject Proposal</span>
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -573,6 +938,213 @@ export function ProposalDetailClient({
           </div>
         </div>
       </div>
+
+      {/* Step 3C: Workflow Status Alert Banners */}
+      {isUnderReview && (
+        <div
+          style={{
+            padding: '1rem 1.25rem',
+            marginBottom: '1.5rem',
+            borderRadius: '0.5rem',
+            backgroundColor: 'rgba(13, 148, 136, 0.1)',
+            border: '1px solid rgba(13, 148, 136, 0.3)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.75rem',
+          }}
+        >
+          <span style={{ fontSize: '1.5rem' }}>⚖️</span>
+          <div>
+            <div style={{ fontWeight: 600, color: '#14b8a6', fontSize: '0.9375rem' }}>
+              Scrutiny Review In Progress
+            </div>
+            <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+              This proposal version is actively being examined by the designated Competent Authority (
+              {proposal.selectedAuthority?.authorityName || 'Assigned Officer'}).
+              Observations and formal decisions will be recorded here upon completion of scrutiny.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isCorrectionRequested && (
+        <div
+          style={{
+            padding: '1.25rem',
+            marginBottom: '1.5rem',
+            borderRadius: '0.5rem',
+            backgroundColor: 'rgba(245, 158, 11, 0.1)',
+            border: '1px solid rgba(245, 158, 11, 0.3)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
+            <span style={{ fontSize: '1.5rem' }}>⚠️</span>
+            <div>
+              <div style={{ fontWeight: 700, color: '#fbbf24', fontSize: '1rem' }}>
+                Action Required: Corrections Requested by Competent Authority
+              </div>
+              <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
+                The Competent Authority has reviewed Version {proposal.currentVersionNumber} and requested specific corrections before this proposal can proceed.
+              </div>
+            </div>
+          </div>
+          {proposal.currentVersion?.reviewRemarks && (
+            <div
+              style={{
+                marginTop: '0.75rem',
+                padding: '0.75rem 1rem',
+                backgroundColor: 'rgba(0, 0, 0, 0.2)',
+                borderRadius: '0.375rem',
+                fontSize: '0.8125rem',
+                borderLeft: '3px solid #f59e0b',
+              }}
+            >
+              <strong style={{ color: '#fbbf24' }}>Decision Remarks: </strong>
+              <span style={{ color: 'var(--text-primary)' }}>{proposal.currentVersion.reviewRemarks}</span>
+              <div style={{ marginTop: '0.25rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                {proposal.decisions && proposal.decisions.length > 0 && proposal.decisions[0]?.decider
+                  ? `Reviewed by ${proposal.decisions[0].decider.name} (${proposal.decisions[0].authority.designation}) on `
+                  : 'Reviewed on '}
+                {proposal.currentVersion.reviewedAt ? new Date(proposal.currentVersion.reviewedAt).toLocaleString() : ''}
+              </div>
+            </div>
+          )}
+          {isAgencyUser && (
+            <div style={{ marginTop: '1rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <button
+                onClick={() => {
+                  setMakeChangesRemarks('');
+                  setMakeChangesError(null);
+                  setShowMakeChangesModal(true);
+                }}
+                className="btn btn-warning"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  padding: '0.45rem 1rem',
+                  fontSize: '0.8125rem',
+                  borderRadius: '0.375rem',
+                  fontWeight: 600,
+                  backgroundColor: 'rgba(234, 88, 12, 0.9)',
+                  color: '#fff',
+                  border: 'none',
+                }}
+              >
+                <span>📝</span>
+                <span>Make Changes (Initialize Version {proposal.currentVersionNumber + 1})</span>
+              </button>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                Initialize a new draft version to address the findings below. Previous version remains immutable.
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {isApproved && (
+        <div
+          style={{
+            padding: '1.25rem',
+            marginBottom: '1.5rem',
+            borderRadius: '0.5rem',
+            backgroundColor: 'rgba(16, 185, 129, 0.1)',
+            border: '1px solid rgba(16, 185, 129, 0.3)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
+            <span style={{ fontSize: '1.5rem' }}>✓</span>
+            <div>
+              <div style={{ fontWeight: 700, color: '#34d399', fontSize: '1rem' }}>
+                Proposal Approved by Competent Authority
+              </div>
+              <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
+                Version {proposal.currentVersionNumber} has been scrutinized and approved by{' '}
+                <strong>{proposal.selectedAuthority?.authorityName || 'Competent Authority'}</strong>.
+              </div>
+            </div>
+          </div>
+          {proposal.currentVersion?.reviewRemarks && (
+            <div
+              style={{
+                marginTop: '0.75rem',
+                padding: '0.75rem 1rem',
+                backgroundColor: 'rgba(0, 0, 0, 0.2)',
+                borderRadius: '0.375rem',
+                fontSize: '0.8125rem',
+                borderLeft: '3px solid #10b981',
+              }}
+            >
+              <strong style={{ color: '#34d399' }}>Approval Remarks: </strong>
+              <span style={{ color: 'var(--text-primary)' }}>{proposal.currentVersion.reviewRemarks}</span>
+              <div style={{ marginTop: '0.25rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                {proposal.decisions && proposal.decisions.length > 0 && proposal.decisions[0]?.decider
+                  ? `Approved by ${proposal.decisions[0].decider.name} (${proposal.decisions[0].authority.designation}) on `
+                  : 'Approved on '}
+                {proposal.currentVersion.reviewedAt ? new Date(proposal.currentVersion.reviewedAt).toLocaleString() : ''}
+              </div>
+            </div>
+          )}
+          <div
+            style={{
+              marginTop: '0.75rem',
+              padding: '0.5rem 0.75rem',
+              borderRadius: '0.25rem',
+              backgroundColor: 'rgba(255, 255, 255, 0.03)',
+              fontSize: '0.75rem',
+              color: 'var(--text-muted)',
+              lineHeight: 1.4,
+            }}
+          >
+            <strong>Statutory Legal Caveat:</strong> Proposal approval represents administrative permission to proceed to subsequent acquisition workflow stages. It does NOT represent statutory authorization to acquire land, final notification, possession authorization, or compensation award.
+          </div>
+        </div>
+      )}
+
+      {isRejected && (
+        <div
+          style={{
+            padding: '1.25rem',
+            marginBottom: '1.5rem',
+            borderRadius: '0.5rem',
+            backgroundColor: 'rgba(239, 68, 68, 0.1)',
+            border: '1px solid rgba(239, 68, 68, 0.3)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
+            <span style={{ fontSize: '1.5rem' }}>✕</span>
+            <div>
+              <div style={{ fontWeight: 700, color: '#f87171', fontSize: '1rem' }}>
+                Proposal Rejected by Competent Authority
+              </div>
+              <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
+                This acquisition proposal has been rejected following formal scrutiny. This is a terminal state.
+              </div>
+            </div>
+          </div>
+          {proposal.currentVersion?.reviewRemarks && (
+            <div
+              style={{
+                marginTop: '0.75rem',
+                padding: '0.75rem 1rem',
+                backgroundColor: 'rgba(0, 0, 0, 0.2)',
+                borderRadius: '0.375rem',
+                fontSize: '0.8125rem',
+                borderLeft: '3px solid #ef4444',
+              }}
+            >
+              <strong style={{ color: '#f87171' }}>Rejection Justification: </strong>
+              <span style={{ color: 'var(--text-primary)' }}>{proposal.currentVersion.reviewRemarks}</span>
+              <div style={{ marginTop: '0.25rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                {proposal.decisions && proposal.decisions.length > 0 && proposal.decisions[0]?.decider
+                  ? `Rejected by ${proposal.decisions[0].decider.name} (${proposal.decisions[0].authority.designation}) on `
+                  : 'Rejected on '}
+                {proposal.currentVersion.reviewedAt ? new Date(proposal.currentVersion.reviewedAt).toLocaleString() : ''}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Grid: Context Information */}
       <div
@@ -808,6 +1380,26 @@ export function ProposalDetailClient({
             >
               ✓ Immutable verified snapshot preserved.
             </div>
+            <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid var(--border-color)' }}>
+              <button
+                type="button"
+                onClick={handleToggleSnapshots}
+                className="btn btn-outline"
+                style={{
+                  width: '100%',
+                  padding: '0.35rem 0.6rem',
+                  fontSize: '0.75rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.4rem',
+                  cursor: 'pointer',
+                }}
+              >
+                <span>🗺</span>
+                <span>{showSnapshotsTable ? 'Hide Parcel Scrutiny Snapshot' : 'View Parcel Scrutiny Snapshot'}</span>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -927,6 +1519,102 @@ export function ProposalDetailClient({
           </div>
         </div>
       </div>
+
+      {/* Step 3C: Immutable Verified Land Inventory Parcel Snapshots Table */}
+      {showSnapshotsTable && (
+        <div
+          className="card"
+          style={{
+            padding: '1.25rem',
+            marginBottom: '1.5rem',
+            backgroundColor: 'var(--bg-secondary)',
+            borderRadius: '0.5rem',
+            border: '1px solid var(--border-color)',
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '1rem',
+              borderBottom: '1px solid var(--border-color)',
+              paddingBottom: '0.5rem',
+            }}
+          >
+            <div>
+              <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>
+                Approved Land Inventory Parcel Scrutiny Snapshot
+              </h3>
+              <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                Immutable verified inventory snapshot linked to this acquisition proposal (Version {proposal.linkedInventory.versionNumber})
+              </p>
+            </div>
+            <button
+              onClick={() => setShowSnapshotsTable(false)}
+              className="btn btn-secondary"
+              style={{ padding: '0.25rem 0.6rem', fontSize: '0.75rem', cursor: 'pointer' }}
+            >
+              Close Snapshot
+            </button>
+          </div>
+
+          {isLoadingSnapshots ? (
+            <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8125rem' }}>
+              Loading immutable parcel snapshots...
+            </div>
+          ) : inventorySnapshots.length === 0 ? (
+            <div style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8125rem' }}>
+              No individual parcel snapshot records found for this inventory version.
+            </div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8125rem' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)', textAlign: 'left' }}>
+                    <th style={{ padding: '0.5rem' }}>Parcel #</th>
+                    <th style={{ padding: '0.5rem' }}>Survey / Subdivision</th>
+                    <th style={{ padding: '0.5rem' }}>Location (Village, Taluk, District)</th>
+                    <th style={{ padding: '0.5rem' }}>Classification</th>
+                    <th style={{ padding: '0.5rem', textAlign: 'right' }}>Total Area</th>
+                    <th style={{ padding: '0.5rem', textAlign: 'right' }}>Affected Area</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {inventorySnapshots.map((snap: any, idx: number) => (
+                    <tr
+                      key={snap.id || idx}
+                      style={{
+                        borderBottom: '1px solid rgba(255, 255, 255, 0.04)',
+                        backgroundColor: idx % 2 === 0 ? 'transparent' : 'rgba(255, 255, 255, 0.01)',
+                      }}
+                    >
+                      <td style={{ padding: '0.5rem', fontFamily: 'var(--font-mono)' }}>
+                        {snap.parcelNumber || snap.parcelId || `P-${idx + 1}`}
+                      </td>
+                      <td style={{ padding: '0.5rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                        {snap.surveyNumber || '—'} {snap.subdivisionNumber ? `/ ${snap.subdivisionNumber}` : ''}
+                      </td>
+                      <td style={{ padding: '0.5rem', color: 'var(--text-secondary)' }}>
+                        {[snap.villageName || snap.village, snap.talukName || snap.taluk, snap.districtName || snap.district].filter(Boolean).join(', ') || '—'}
+                      </td>
+                      <td style={{ padding: '0.5rem', color: 'var(--text-muted)' }}>
+                        {snap.landClassification || snap.classification || 'Standard'}
+                      </td>
+                      <td style={{ padding: '0.5rem', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>
+                        {snap.recordedArea || snap.totalArea || '—'} {snap.areaUnit || proposal.linkedInventory.areaUnit}
+                      </td>
+                      <td style={{ padding: '0.5rem', textAlign: 'right', fontFamily: 'var(--font-mono)', color: '#fb923c', fontWeight: 600 }}>
+                        {snap.affectedArea || '—'} {snap.areaUnit || proposal.linkedInventory.areaUnit}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Version Navigation / Selector Banner */}
       {versionsList.length > 1 && (
@@ -1478,6 +2166,252 @@ export function ProposalDetailClient({
                 })}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* Step 3C: Scrutiny Observations Card */}
+      <div
+        className="card"
+        style={{
+          padding: '1.5rem',
+          marginBottom: '1.5rem',
+          backgroundColor: 'var(--bg-secondary)',
+          borderRadius: '0.5rem',
+          border: '1px solid var(--border-color)',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: '1rem',
+            borderBottom: '1px solid var(--border-color)',
+            paddingBottom: '0.75rem',
+          }}
+        >
+          <div>
+            <h2
+              style={{
+                fontSize: '1.125rem',
+                fontWeight: 600,
+                color: 'var(--text-primary)',
+                margin: 0,
+              }}
+            >
+              Scrutiny Observations & Findings
+            </h2>
+            <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+              Observations recorded by the Competent Authority during scrutiny. Preserved per version.
+            </p>
+          </div>
+          {isUnderReview && isCompetentAuthorityUser && isViewingCurrent && (
+            <button
+              onClick={() => {
+                setObsError(null);
+                setShowObservationModal(true);
+              }}
+              className="btn btn-secondary"
+              style={{
+                padding: '0.35rem 0.75rem',
+                fontSize: '0.75rem',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.3rem',
+                cursor: 'pointer',
+              }}
+            >
+              <span>+</span>
+              <span>Add Observation</span>
+            </button>
+          )}
+        </div>
+
+        {(!proposal.observations || proposal.observations.length === 0) ? (
+          <div
+            style={{
+              padding: '2rem',
+              textAlign: 'center',
+              color: 'var(--text-muted)',
+              fontSize: '0.8125rem',
+              backgroundColor: 'rgba(255, 255, 255, 0.01)',
+              borderRadius: '0.375rem',
+              border: '1px dashed var(--border-color)',
+            }}
+          >
+            No scrutiny observations recorded for this proposal yet.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            {proposal.observations.map((obs) => {
+              const catMeta = OBSERVATION_CATEGORY_META[obs.observationCategory as ObservationCategory] || {
+                label: obs.observationCategory,
+                color: '#94a3b8',
+                bg: 'rgba(148, 163, 184, 0.1)',
+                border: 'rgba(148, 163, 184, 0.2)',
+              };
+              return (
+                <div
+                  key={obs.id}
+                  style={{
+                    padding: '1rem',
+                    borderRadius: '0.375rem',
+                    backgroundColor: 'rgba(255, 255, 255, 0.02)',
+                    border: '1px solid var(--border-color)',
+                    fontSize: '0.8125rem',
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'flex-start',
+                      marginBottom: '0.5rem',
+                      gap: '0.75rem',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                      <span
+                        style={{
+                          fontSize: '0.6875rem',
+                          fontWeight: 700,
+                          padding: '0.15rem 0.5rem',
+                          borderRadius: '0.25rem',
+                          backgroundColor: catMeta.bg,
+                          color: catMeta.color,
+                          border: `1px solid ${catMeta.border}`,
+                        }}
+                      >
+                        {catMeta.label}
+                      </span>
+                      <strong style={{ color: 'var(--text-primary)', fontSize: '0.875rem' }}>
+                        {obs.observationTitle}
+                      </strong>
+                      {obs.relatedSection && (
+                        <span
+                          style={{
+                            fontSize: '0.6875rem',
+                            color: 'var(--text-muted)',
+                            backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                            padding: '0.1rem 0.35rem',
+                            borderRadius: '0.2rem',
+                          }}
+                        >
+                          Section: {obs.relatedSection}
+                        </span>
+                      )}
+                    </div>
+
+                    <div style={{ textAlign: 'right', fontSize: '0.75rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                      <div>{obs.author?.name || 'Reviewing Officer'}</div>
+                      <div>{new Date(obs.createdAt).toLocaleString()}</div>
+                    </div>
+                  </div>
+
+                  <p
+                    style={{
+                      margin: 0,
+                      color: 'var(--text-secondary)',
+                      lineHeight: 1.5,
+                      whiteSpace: 'pre-wrap',
+                    }}
+                  >
+                    {obs.observationDescription}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Step 3C: Scrutiny Decisions Card */}
+      {proposal.decisions && proposal.decisions.length > 0 && (
+        <div
+          className="card"
+          style={{
+            padding: '1.5rem',
+            marginBottom: '1.5rem',
+            backgroundColor: 'var(--bg-secondary)',
+            borderRadius: '0.5rem',
+            border: '1px solid var(--border-color)',
+          }}
+        >
+          <h2
+            style={{
+              fontSize: '1.125rem',
+              fontWeight: 600,
+              color: 'var(--text-primary)',
+              marginBottom: '1rem',
+              borderBottom: '1px solid var(--border-color)',
+              paddingBottom: '0.75rem',
+            }}
+          >
+            Formal Scrutiny Decisions
+          </h2>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            {proposal.decisions.map((dec) => {
+              const meta = DECISION_META[dec.decisionType as ScrutinyDecisionType] || {
+                label: dec.decisionType,
+                color: '#94a3b8',
+                bg: 'rgba(148, 163, 184, 0.1)',
+                border: 'rgba(148, 163, 184, 0.2)',
+              };
+              return (
+                <div
+                  key={dec.id}
+                  style={{
+                    padding: '1rem',
+                    borderRadius: '0.375rem',
+                    backgroundColor: 'rgba(255, 255, 255, 0.02)',
+                    border: `1px solid ${meta.border}`,
+                    borderLeft: `4px solid ${meta.color}`,
+                    fontSize: '0.8125rem',
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'flex-start',
+                      marginBottom: '0.5rem',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span
+                        style={{
+                          fontSize: '0.75rem',
+                          fontWeight: 700,
+                          padding: '0.2rem 0.6rem',
+                          borderRadius: '0.25rem',
+                          backgroundColor: meta.bg,
+                          color: meta.color,
+                        }}
+                      >
+                        {meta.label}
+                      </span>
+                      <span style={{ color: 'var(--text-secondary)' }}>
+                        Recorded on Proposal Version
+                      </span>
+                    </div>
+
+                    <div style={{ textAlign: 'right', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                      <div>
+                        {dec.decider?.name || 'Competent Authority'}
+                        {dec.authority?.designation ? ` (${dec.authority.designation})` : ''}
+                      </div>
+                      <div>{new Date(dec.createdAt).toLocaleString()}</div>
+                    </div>
+                  </div>
+
+                  <div style={{ color: 'var(--text-primary)', lineHeight: 1.5, marginTop: '0.5rem' }}>
+                    <strong style={{ color: 'var(--text-secondary)' }}>Remarks / Justification: </strong>
+                    {dec.decisionRemarks}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -2080,6 +3014,418 @@ export function ProposalDetailClient({
                 {isMakingChanges ? 'Creating Version...' : 'Initialize New Draft Version'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────────
+          STEP 3C: MODAL: ADD SCRUTINY OBSERVATION
+      ───────────────────────────────────────────────────────────── */}
+      {showObservationModal && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.75)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: '1rem',
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: 'var(--bg-secondary, #1e293b)',
+              border: '1px solid var(--border-color, #334155)',
+              borderRadius: '0.5rem',
+              maxWidth: '600px',
+              width: '100%',
+              padding: '1.5rem',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: '1rem',
+                borderBottom: '1px solid var(--border-color)',
+                paddingBottom: '0.5rem',
+              }}
+            >
+              <h3
+                style={{
+                  fontSize: '1.25rem',
+                  fontWeight: 700,
+                  color: 'var(--text-primary)',
+                  margin: 0,
+                }}
+              >
+                Record Scrutiny Observation
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowObservationModal(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--text-muted)',
+                  fontSize: '1.25rem',
+                  cursor: 'pointer',
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleRecordObservation}>
+              {obsError && (
+                <div
+                  style={{
+                    padding: '0.75rem 1rem',
+                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                    border: '1px solid rgba(239, 68, 68, 0.3)',
+                    borderRadius: '0.375rem',
+                    color: '#f87171',
+                    fontSize: '0.8125rem',
+                    marginBottom: '1rem',
+                  }}
+                >
+                  {obsError}
+                </div>
+              )}
+
+              <div style={{ marginBottom: '1rem' }}>
+                <label
+                  style={{
+                    display: 'block',
+                    fontSize: '0.8125rem',
+                    color: 'var(--text-secondary)',
+                    marginBottom: '0.375rem',
+                  }}
+                >
+                  Observation Category *
+                </label>
+                <select
+                  value={obsCategory}
+                  onChange={(e) => setObsCategory(e.target.value as ObservationCategory)}
+                  style={{
+                    width: '100%',
+                    padding: '0.6rem',
+                    borderRadius: '0.375rem',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'var(--bg-primary)',
+                    color: 'var(--text-primary)',
+                    fontSize: '0.8125rem',
+                  }}
+                >
+                  {OBSERVATION_CATEGORIES.map((cat) => (
+                    <option key={cat} value={cat}>
+                      {OBSERVATION_CATEGORY_META[cat]?.label || cat}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ marginBottom: '1rem' }}>
+                <label
+                  style={{
+                    display: 'block',
+                    fontSize: '0.8125rem',
+                    color: 'var(--text-secondary)',
+                    marginBottom: '0.375rem',
+                  }}
+                >
+                  Relevant Proposal Section (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={obsSection}
+                  onChange={(e) => setObsSection(e.target.value)}
+                  placeholder="e.g. Project Justification, Financial Provisions, Land Requirement..."
+                  style={{
+                    width: '100%',
+                    padding: '0.6rem',
+                    borderRadius: '0.375rem',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'var(--bg-primary)',
+                    color: 'var(--text-primary)',
+                    fontSize: '0.8125rem',
+                  }}
+                />
+              </div>
+
+              <div style={{ marginBottom: '1rem' }}>
+                <label
+                  style={{
+                    display: 'block',
+                    fontSize: '0.8125rem',
+                    color: 'var(--text-secondary)',
+                    marginBottom: '0.375rem',
+                  }}
+                >
+                  Observation Title *
+                </label>
+                <input
+                  type="text"
+                  value={obsTitle}
+                  onChange={(e) => setObsTitle(e.target.value)}
+                  placeholder="Short, descriptive finding title..."
+                  required
+                  style={{
+                    width: '100%',
+                    padding: '0.6rem',
+                    borderRadius: '0.375rem',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'var(--bg-primary)',
+                    color: 'var(--text-primary)',
+                    fontSize: '0.8125rem',
+                  }}
+                />
+              </div>
+
+              <div style={{ marginBottom: '1.25rem' }}>
+                <label
+                  style={{
+                    display: 'block',
+                    fontSize: '0.8125rem',
+                    color: 'var(--text-secondary)',
+                    marginBottom: '0.375rem',
+                  }}
+                >
+                  Detailed Scrutiny Finding / Observation *
+                </label>
+                <textarea
+                  value={obsDescription}
+                  onChange={(e) => setObsDescription(e.target.value)}
+                  placeholder="Describe your legal, technical, administrative, or land-record finding in detail..."
+                  required
+                  style={{
+                    width: '100%',
+                    padding: '0.6rem',
+                    borderRadius: '0.375rem',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'var(--bg-primary)',
+                    color: 'var(--text-primary)',
+                    fontSize: '0.8125rem',
+                    minHeight: '110px',
+                  }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowObservationModal(false)}
+                  disabled={isRecordingObs}
+                  className="btn btn-secondary"
+                  style={{ padding: '0.45rem 1rem', fontSize: '0.8125rem', cursor: 'pointer' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isRecordingObs || !obsTitle.trim() || !obsDescription.trim()}
+                  id="submit-observation-btn"
+                  className="btn btn-primary"
+                  style={{ padding: '0.45rem 1rem', fontSize: '0.8125rem', cursor: 'pointer' }}
+                >
+                  {isRecordingObs ? 'Recording Finding...' : 'Record Finding'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────────
+          STEP 3C: MODAL: FORMAL SCRUTINY DECISION (APPROVED / CORRECTION_REQUESTED / REJECTED)
+      ───────────────────────────────────────────────────────────── */}
+      {decisionModalType && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.75)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: '1rem',
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: 'var(--bg-secondary, #1e293b)',
+              border: '1px solid var(--border-color, #334155)',
+              borderRadius: '0.5rem',
+              maxWidth: '620px',
+              width: '100%',
+              padding: '1.5rem',
+            }}
+          >
+            <h3
+              style={{
+                fontSize: '1.25rem',
+                fontWeight: 700,
+                color:
+                  decisionModalType === 'APPROVED'
+                    ? '#10b981'
+                    : decisionModalType === 'CORRECTION_REQUESTED'
+                    ? '#f59e0b'
+                    : '#ef4444',
+                marginBottom: '0.75rem',
+              }}
+            >
+              {decisionModalType === 'APPROVED' && 'Confirm Proposal Approval'}
+              {decisionModalType === 'CORRECTION_REQUESTED' && 'Request Proposal Corrections'}
+              {decisionModalType === 'REJECTED' && 'Confirm Proposal Rejection'}
+            </h3>
+
+            {/* Explanatory context box */}
+            <div
+              style={{
+                padding: '0.875rem 1rem',
+                backgroundColor:
+                  decisionModalType === 'APPROVED'
+                    ? 'rgba(16, 185, 129, 0.1)'
+                    : decisionModalType === 'CORRECTION_REQUESTED'
+                    ? 'rgba(245, 158, 11, 0.1)'
+                    : 'rgba(239, 68, 68, 0.1)',
+                border: `1px solid ${
+                  decisionModalType === 'APPROVED'
+                    ? 'rgba(16, 185, 129, 0.3)'
+                    : decisionModalType === 'CORRECTION_REQUESTED'
+                    ? 'rgba(245, 158, 11, 0.3)'
+                    : 'rgba(239, 68, 68, 0.3)'
+                }`,
+                borderRadius: '0.375rem',
+                color:
+                  decisionModalType === 'APPROVED'
+                    ? '#34d399'
+                    : decisionModalType === 'CORRECTION_REQUESTED'
+                    ? '#fbbf24'
+                    : '#f87171',
+                fontSize: '0.8125rem',
+                marginBottom: '1rem',
+                lineHeight: 1.5,
+              }}
+            >
+              {decisionModalType === 'APPROVED' && (
+                <div>
+                  <strong>Proposal Approval:</strong> Grants permission to proceed to subsequent acquisition workflow stages.
+                  <div style={{ marginTop: '0.35rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    Statutory Legal Caveat: Does NOT constitute Section 11 preliminary notification, statutory authorization to acquire land, possession authorization, or compensation award.
+                  </div>
+                </div>
+              )}
+              {decisionModalType === 'CORRECTION_REQUESTED' && (
+                <div>
+                  <strong>Corrections Requested:</strong> Transitions proposal to <code>CORRECTION_REQUESTED</code>. The Implementing Agency will be authorized to create Version {proposal.currentVersionNumber + 1} to address observations. Current version remains immutable.
+                </div>
+              )}
+              {decisionModalType === 'REJECTED' && (
+                <div>
+                  <strong>Proposal Rejection:</strong> Transitions proposal to <code>REJECTED</code>. This is a terminal state; no new draft versions can be created under this proposal.
+                </div>
+              )}
+            </div>
+
+            <form onSubmit={handleRecordDecision}>
+              {decisionError && (
+                <div
+                  style={{
+                    padding: '0.75rem 1rem',
+                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                    border: '1px solid rgba(239, 68, 68, 0.3)',
+                    borderRadius: '0.375rem',
+                    color: '#f87171',
+                    fontSize: '0.8125rem',
+                    marginBottom: '1rem',
+                  }}
+                >
+                  {decisionError}
+                </div>
+              )}
+
+              <div style={{ marginBottom: '1.25rem' }}>
+                <label
+                  style={{
+                    display: 'block',
+                    fontSize: '0.8125rem',
+                    color: 'var(--text-secondary)',
+                    marginBottom: '0.375rem',
+                  }}
+                >
+                  Decision Remarks / Justification * (Min 10 characters)
+                </label>
+                <textarea
+                  value={decisionRemarks}
+                  onChange={(e) => setDecisionRemarks(e.target.value)}
+                  placeholder={
+                    decisionModalType === 'APPROVED'
+                      ? 'State the basis and reasons for approving this acquisition proposal...'
+                      : decisionModalType === 'CORRECTION_REQUESTED'
+                      ? 'Summarize the specific revisions, documents, or land information required from the agency...'
+                      : 'Provide statutory or administrative justification for rejecting this proposal...'
+                  }
+                  required
+                  rows={4}
+                  style={{
+                    width: '100%',
+                    padding: '0.6rem',
+                    borderRadius: '0.375rem',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'var(--bg-primary)',
+                    color: 'var(--text-primary)',
+                    fontSize: '0.8125rem',
+                  }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+                <button
+                  type="button"
+                  onClick={() => setDecisionModalType(null)}
+                  disabled={isRecordingDecision}
+                  className="btn btn-secondary"
+                  style={{ padding: '0.45rem 1rem', fontSize: '0.8125rem', cursor: 'pointer' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isRecordingDecision || decisionRemarks.trim().length < 10}
+                  id="confirm-decision-btn"
+                  className="btn"
+                  style={{
+                    padding: '0.45rem 1.25rem',
+                    fontSize: '0.8125rem',
+                    fontWeight: 600,
+                    backgroundColor:
+                      decisionModalType === 'APPROVED'
+                        ? '#10b981'
+                        : decisionModalType === 'CORRECTION_REQUESTED'
+                        ? '#f59e0b'
+                        : '#ef4444',
+                    color: '#fff',
+                    border: 'none',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {isRecordingDecision ? 'Recording Decision...' : `Confirm ${decisionModalType}`}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

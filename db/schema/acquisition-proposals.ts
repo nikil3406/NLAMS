@@ -17,6 +17,7 @@ import { projects } from './projects';
 import { implementingAgencies } from './implementing-agencies';
 import { verifiedLandInventories } from './verified-land-inventories';
 import { users } from './users';
+import { competentAuthorities } from './competent-authorities';
 
 /**
  * Valid lifecycle statuses for acquisition proposals.
@@ -46,6 +47,28 @@ export const PROPOSAL_WORKFLOW_ACTIONS = [
 ] as const;
 
 export type ProposalWorkflowAction = (typeof PROPOSAL_WORKFLOW_ACTIONS)[number];
+
+export const OBSERVATION_CATEGORIES = [
+  'PROJECT_JUSTIFICATION',
+  'LAND_REQUIREMENT',
+  'LAND_RECORDS',
+  'PARCEL_DETAILS',
+  'DOCUMENTATION',
+  'FINANCIAL_INFORMATION',
+  'ADMINISTRATIVE_REQUIREMENTS',
+  'LEGAL_REQUIREMENTS',
+  'OTHER',
+] as const;
+
+export type ObservationCategory = (typeof OBSERVATION_CATEGORIES)[number];
+
+export const SCRUTINY_DECISION_TYPES = [
+  'APPROVED',
+  'CORRECTION_REQUESTED',
+  'REJECTED',
+] as const;
+
+export type ScrutinyDecisionType = (typeof SCRUTINY_DECISION_TYPES)[number];
 
 /**
  * Acquisition Proposal Header Entity.
@@ -225,6 +248,80 @@ export const acquisitionProposalWorkflowHistory = pgTable(
   ]
 );
 
+/**
+ * Scrutiny Observations recorded by the Competent Authority during proposal examination.
+ */
+export const proposalScrutinyObservations = pgTable(
+  'proposal_scrutiny_observations',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    proposalId: uuid('proposal_id')
+      .notNull()
+      .references(() => acquisitionProposals.id, { onDelete: 'cascade' }),
+    proposalVersionId: uuid('proposal_version_id')
+      .notNull()
+      .references(() => acquisitionProposalVersions.id, { onDelete: 'cascade' }),
+    observationCategory: varchar('observation_category', { length: 50 }).notNull(),
+    observationTitle: varchar('observation_title', { length: 255 }).notNull(),
+    observationDescription: text('observation_description').notNull(),
+    relatedSection: varchar('related_section', { length: 100 }),
+    relatedParcelId: uuid('related_parcel_id'),
+    relatedDocumentId: varchar('related_document_id', { length: 255 }),
+    createdBy: uuid('created_by')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('prop_scrutiny_obs_proposal_id_idx').on(table.proposalId),
+    index('prop_scrutiny_obs_version_id_idx').on(table.proposalVersionId),
+    index('prop_scrutiny_obs_category_idx').on(table.observationCategory),
+    index('prop_scrutiny_obs_created_by_idx').on(table.createdBy),
+    check(
+      'prop_scrutiny_obs_category_check',
+      sql`${table.observationCategory} IN ('PROJECT_JUSTIFICATION', 'LAND_REQUIREMENT', 'LAND_RECORDS', 'PARCEL_DETAILS', 'DOCUMENTATION', 'FINANCIAL_INFORMATION', 'ADMINISTRATIVE_REQUIREMENTS', 'LEGAL_REQUIREMENTS', 'OTHER')`
+    ),
+  ]
+);
+
+/**
+ * Formal scrutiny decisions recorded by the Competent Authority.
+ */
+export const proposalScrutinyDecisions = pgTable(
+  'proposal_scrutiny_decisions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    proposalId: uuid('proposal_id')
+      .notNull()
+      .references(() => acquisitionProposals.id, { onDelete: 'cascade' }),
+    proposalVersionId: uuid('proposal_version_id')
+      .notNull()
+      .references(() => acquisitionProposalVersions.id, { onDelete: 'cascade' }),
+    competentAuthorityId: uuid('competent_authority_id')
+      .notNull()
+      .references(() => competentAuthorities.id, { onDelete: 'restrict' }),
+    decisionType: varchar('decision_type', { length: 50 }).notNull(),
+    decisionRemarks: text('decision_remarks').notNull(),
+    supportingDocuments: jsonb('supporting_documents').$type<ProposalSupportingDocument[]>(),
+    decidedBy: uuid('decided_by')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    decidedAt: timestamp('decided_at', { withTimezone: true }).defaultNow().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('prop_scrutiny_dec_proposal_id_idx').on(table.proposalId),
+    index('prop_scrutiny_dec_version_id_idx').on(table.proposalVersionId),
+    index('prop_scrutiny_dec_authority_id_idx').on(table.competentAuthorityId),
+    index('prop_scrutiny_dec_decided_by_idx').on(table.decidedBy),
+    index('prop_scrutiny_dec_type_idx').on(table.decisionType),
+    check(
+      'prop_scrutiny_dec_type_check',
+      sql`${table.decisionType} IN ('APPROVED', 'CORRECTION_REQUESTED', 'REJECTED')`
+    ),
+  ]
+);
+
 export const acquisitionProposalsRelations = relations(
   acquisitionProposals,
   ({ one, many }) => ({
@@ -264,12 +361,14 @@ export const acquisitionProposalsRelations = relations(
       relationName: 'proposalVersions',
     }),
     workflowHistory: many(acquisitionProposalWorkflowHistory),
+    observations: many(proposalScrutinyObservations),
+    decisions: many(proposalScrutinyDecisions),
   })
 );
 
 export const acquisitionProposalVersionsRelations = relations(
   acquisitionProposalVersions,
-  ({ one }) => ({
+  ({ one, many }) => ({
     proposal: one(acquisitionProposals, {
       fields: [acquisitionProposalVersions.proposalId],
       references: [acquisitionProposals.id],
@@ -294,6 +393,48 @@ export const acquisitionProposalVersionsRelations = relations(
       fields: [acquisitionProposalVersions.previousVersionId],
       references: [acquisitionProposalVersions.id],
       relationName: 'proposalPreviousVersion',
+    }),
+    observations: many(proposalScrutinyObservations),
+    decisions: many(proposalScrutinyDecisions),
+  })
+);
+
+export const proposalScrutinyObservationsRelations = relations(
+  proposalScrutinyObservations,
+  ({ one }) => ({
+    proposal: one(acquisitionProposals, {
+      fields: [proposalScrutinyObservations.proposalId],
+      references: [acquisitionProposals.id],
+    }),
+    version: one(acquisitionProposalVersions, {
+      fields: [proposalScrutinyObservations.proposalVersionId],
+      references: [acquisitionProposalVersions.id],
+    }),
+    author: one(users, {
+      fields: [proposalScrutinyObservations.createdBy],
+      references: [users.id],
+    }),
+  })
+);
+
+export const proposalScrutinyDecisionsRelations = relations(
+  proposalScrutinyDecisions,
+  ({ one }) => ({
+    proposal: one(acquisitionProposals, {
+      fields: [proposalScrutinyDecisions.proposalId],
+      references: [acquisitionProposals.id],
+    }),
+    version: one(acquisitionProposalVersions, {
+      fields: [proposalScrutinyDecisions.proposalVersionId],
+      references: [acquisitionProposalVersions.id],
+    }),
+    authority: one(competentAuthorities, {
+      fields: [proposalScrutinyDecisions.competentAuthorityId],
+      references: [competentAuthorities.id],
+    }),
+    decider: one(users, {
+      fields: [proposalScrutinyDecisions.decidedBy],
+      references: [users.id],
     }),
   })
 );
@@ -320,3 +461,13 @@ export type AcquisitionProposalWorkflowHistory =
   typeof acquisitionProposalWorkflowHistory.$inferSelect;
 export type NewAcquisitionProposalWorkflowHistory =
   typeof acquisitionProposalWorkflowHistory.$inferInsert;
+
+export type ProposalScrutinyObservation =
+  typeof proposalScrutinyObservations.$inferSelect;
+export type NewProposalScrutinyObservation =
+  typeof proposalScrutinyObservations.$inferInsert;
+
+export type ProposalScrutinyDecision =
+  typeof proposalScrutinyDecisions.$inferSelect;
+export type NewProposalScrutinyDecision =
+  typeof proposalScrutinyDecisions.$inferInsert;

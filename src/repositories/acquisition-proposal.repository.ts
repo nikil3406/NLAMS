@@ -4,12 +4,18 @@ import {
   acquisitionProposals,
   acquisitionProposalVersions,
   acquisitionProposalWorkflowHistory,
+  proposalScrutinyObservations,
+  proposalScrutinyDecisions,
   type AcquisitionProposal,
   type NewAcquisitionProposal,
   type AcquisitionProposalVersion,
   type NewAcquisitionProposalVersion,
   type AcquisitionProposalWorkflowHistory,
   type NewAcquisitionProposalWorkflowHistory,
+  type ProposalScrutinyObservation,
+  type NewProposalScrutinyObservation,
+  type ProposalScrutinyDecision,
+  type NewProposalScrutinyDecision,
 } from '../../db/schema/acquisition-proposals';
 import { acquisitionCases } from '../../db/schema/acquisition-cases';
 import { projects } from '../../db/schema/projects';
@@ -179,6 +185,26 @@ export interface ProposalWithDetails extends AcquisitionProposal {
       id: string;
       name: string;
       email: string;
+    };
+  })[];
+  observations?: (ProposalScrutinyObservation & {
+    author: {
+      id: string;
+      name: string;
+      email: string;
+    };
+  })[];
+  decisions?: (ProposalScrutinyDecision & {
+    decider: {
+      id: string;
+      name: string;
+      email: string;
+    };
+    authority: {
+      id: string;
+      authorityName: string;
+      designation: string;
+      authorityCode: string;
     };
   })[];
 }
@@ -491,6 +517,57 @@ export class AcquisitionProposalRepository {
       }
     }
 
+    // Fetch scrutiny observations
+    const observationRows = await executor
+      .select({
+        observation: proposalScrutinyObservations,
+        author: {
+          id: users.id,
+          name: users.name,
+          email: users.email,
+        },
+      })
+      .from(proposalScrutinyObservations)
+      .innerJoin(users, eq(proposalScrutinyObservations.createdBy, users.id))
+      .where(eq(proposalScrutinyObservations.proposalId, id))
+      .orderBy(desc(proposalScrutinyObservations.createdAt));
+
+    const observations = observationRows.map((o) => ({
+      ...o.observation,
+      author: o.author,
+    }));
+
+    // Fetch scrutiny decisions
+    const decisionRows = await executor
+      .select({
+        decision: proposalScrutinyDecisions,
+        decider: {
+          id: users.id,
+          name: users.name,
+          email: users.email,
+        },
+        authority: {
+          id: competentAuthorities.id,
+          authorityName: competentAuthorities.authorityName,
+          designation: competentAuthorities.designation,
+          authorityCode: competentAuthorities.authorityCode,
+        },
+      })
+      .from(proposalScrutinyDecisions)
+      .innerJoin(users, eq(proposalScrutinyDecisions.decidedBy, users.id))
+      .innerJoin(
+        competentAuthorities,
+        eq(proposalScrutinyDecisions.competentAuthorityId, competentAuthorities.id)
+      )
+      .where(eq(proposalScrutinyDecisions.proposalId, id))
+      .orderBy(desc(proposalScrutinyDecisions.decidedAt));
+
+    const decisions = decisionRows.map((d) => ({
+      ...d.decision,
+      decider: d.decider,
+      authority: d.authority,
+    }));
+
     return {
       ...header,
       project: {
@@ -514,6 +591,8 @@ export class AcquisitionProposalRepository {
       currentVersion,
       selectedAuthority,
       workflowHistory,
+      observations,
+      decisions,
     };
   }
 
@@ -1150,6 +1229,210 @@ export class AcquisitionProposalRepository {
       .where(and(...conditions));
 
     return row?.count ?? 0;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Step 3C: Scrutiny Observations & Decisions Repository Methods
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Inserts a new scrutiny observation record against a proposal version.
+   */
+  async createScrutinyObservation(
+    data: NewProposalScrutinyObservation,
+    tx?: TransactionClient
+  ): Promise<ProposalScrutinyObservation> {
+    const executor = tx ?? db;
+    const [inserted] = await executor
+      .insert(proposalScrutinyObservations)
+      .values(data)
+      .returning();
+    return inserted;
+  }
+
+  /**
+   * Finds observations recorded for a proposal, optionally filtered by version.
+   */
+  async findObservationsByProposalId(
+    proposalId: string,
+    versionId?: string,
+    tx?: TransactionClient
+  ): Promise<
+    (ProposalScrutinyObservation & {
+      author: { id: string; name: string; email: string };
+    })[]
+  > {
+    const executor = tx ?? db;
+    const conditions = [eq(proposalScrutinyObservations.proposalId, proposalId)];
+    if (versionId) {
+      conditions.push(eq(proposalScrutinyObservations.proposalVersionId, versionId));
+    }
+
+    const rows = await executor
+      .select({
+        observation: proposalScrutinyObservations,
+        author: {
+          id: users.id,
+          name: users.name,
+          email: users.email,
+        },
+      })
+      .from(proposalScrutinyObservations)
+      .innerJoin(users, eq(proposalScrutinyObservations.createdBy, users.id))
+      .where(and(...conditions))
+      .orderBy(desc(proposalScrutinyObservations.createdAt));
+
+    return rows.map((r) => ({
+      ...r.observation,
+      author: r.author,
+    }));
+  }
+
+  /**
+   * Inserts a new scrutiny decision record against a proposal version.
+   */
+  async createScrutinyDecision(
+    data: NewProposalScrutinyDecision,
+    tx?: TransactionClient
+  ): Promise<ProposalScrutinyDecision> {
+    const executor = tx ?? db;
+    const [inserted] = await executor
+      .insert(proposalScrutinyDecisions)
+      .values(data)
+      .returning();
+    return inserted;
+  }
+
+  /**
+   * Finds all scrutiny decisions recorded for a proposal.
+   */
+  async findDecisionsByProposalId(
+    proposalId: string,
+    tx?: TransactionClient
+  ): Promise<
+    (ProposalScrutinyDecision & {
+      decider: { id: string; name: string; email: string };
+      authority: {
+        id: string;
+        authorityName: string;
+        designation: string;
+        authorityCode: string;
+      };
+    })[]
+  > {
+    const executor = tx ?? db;
+    const rows = await executor
+      .select({
+        decision: proposalScrutinyDecisions,
+        decider: {
+          id: users.id,
+          name: users.name,
+          email: users.email,
+        },
+        authority: {
+          id: competentAuthorities.id,
+          authorityName: competentAuthorities.authorityName,
+          designation: competentAuthorities.designation,
+          authorityCode: competentAuthorities.authorityCode,
+        },
+      })
+      .from(proposalScrutinyDecisions)
+      .innerJoin(users, eq(proposalScrutinyDecisions.decidedBy, users.id))
+      .innerJoin(
+        competentAuthorities,
+        eq(proposalScrutinyDecisions.competentAuthorityId, competentAuthorities.id)
+      )
+      .where(eq(proposalScrutinyDecisions.proposalId, proposalId))
+      .orderBy(desc(proposalScrutinyDecisions.decidedAt));
+
+    return rows.map((r) => ({
+      ...r.decision,
+      decider: r.decider,
+      authority: r.authority,
+    }));
+  }
+
+  /**
+   * Finds the scrutiny decision recorded for a specific proposal version.
+   */
+  async findDecisionByVersionId(
+    proposalVersionId: string,
+    tx?: TransactionClient
+  ): Promise<
+    | (ProposalScrutinyDecision & {
+        decider: { id: string; name: string; email: string };
+        authority: {
+          id: string;
+          authorityName: string;
+          designation: string;
+          authorityCode: string;
+        };
+      })
+    | null
+  > {
+    const executor = tx ?? db;
+    const [row] = await executor
+      .select({
+        decision: proposalScrutinyDecisions,
+        decider: {
+          id: users.id,
+          name: users.name,
+          email: users.email,
+        },
+        authority: {
+          id: competentAuthorities.id,
+          authorityName: competentAuthorities.authorityName,
+          designation: competentAuthorities.designation,
+          authorityCode: competentAuthorities.authorityCode,
+        },
+      })
+      .from(proposalScrutinyDecisions)
+      .innerJoin(users, eq(proposalScrutinyDecisions.decidedBy, users.id))
+      .innerJoin(
+        competentAuthorities,
+        eq(proposalScrutinyDecisions.competentAuthorityId, competentAuthorities.id)
+      )
+      .where(eq(proposalScrutinyDecisions.proposalVersionId, proposalVersionId))
+      .limit(1);
+
+    if (!row) return null;
+    return {
+      ...row.decision,
+      decider: row.decider,
+      authority: row.authority,
+    };
+  }
+
+  /**
+   * Finds workflow audit history for a proposal.
+   */
+  async findWorkflowHistoryByProposalId(
+    proposalId: string,
+    tx?: TransactionClient
+  ): Promise<
+    (AcquisitionProposalWorkflowHistory & {
+      actor: { id: string; name: string; email: string };
+    })[]
+  > {
+    const executor = tx ?? db;
+    const rows = await executor
+      .select({
+        history: acquisitionProposalWorkflowHistory,
+        actor: {
+          id: users.id,
+          name: users.name,
+          email: users.email,
+        },
+      })
+      .from(acquisitionProposalWorkflowHistory)
+      .innerJoin(users, eq(acquisitionProposalWorkflowHistory.actorId, users.id))
+      .where(eq(acquisitionProposalWorkflowHistory.proposalId, proposalId))
+      .orderBy(desc(acquisitionProposalWorkflowHistory.createdAt));
+
+    return rows.map((h) => ({
+      ...h.history,
+      actor: h.actor,
+    }));
   }
 }
 

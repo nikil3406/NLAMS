@@ -10,7 +10,13 @@ import {
 } from '../../repositories/acquisition-proposal.repository';
 import { acquisitionCaseRepository } from '../../repositories/acquisition-case.repository';
 import { verifiedLandInventoryRepository } from '../../repositories/verified-land-inventory.repository';
-import { acquisitionProposals } from '../../../db/schema/acquisition-proposals';
+import {
+  acquisitionProposals,
+  type ProposalScrutinyObservation,
+  type ProposalScrutinyDecision,
+  type AcquisitionProposalVersion,
+  type AcquisitionProposalWorkflowHistory,
+} from '../../../db/schema/acquisition-proposals';
 import { acquisitionCases } from '../../../db/schema/acquisition-cases';
 import { projects } from '../../../db/schema/projects';
 import { verifiedLandInventories } from '../../../db/schema/verified-land-inventories';
@@ -35,6 +41,8 @@ import type {
   CreateAcquisitionProposalInput,
   UpdateAcquisitionProposalInput,
   AcquisitionProposalQueryInput,
+  CreateObservationInput,
+  RecordDecisionInput,
 } from '../../validators/acquisition-proposals';
 
 export interface PaginatedProposalsResult {
@@ -1120,6 +1128,369 @@ export class AcquisitionProposalService {
         designation: a.designation,
         authorityLevel: a.authorityLevel,
       })),
+    };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Step 3C: Scrutiny Review, Observations, and Decisions Workflow
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Asserts that the caller is an authorized Competent Authority officer assigned
+   * to scrutinize the given proposal, and that the proposal is in reviewable status.
+   */
+  async assertCanScrutinizeProposal(
+    proposalId: string,
+    userId: string
+  ): Promise<{
+    proposal: ProposalWithDetails;
+    authorityId: string;
+  }> {
+    const proposal = await acquisitionProposalRepository.findProposalById(proposalId);
+    if (!proposal) {
+      throw new NotFoundError(`Acquisition proposal with ID '${proposalId}' not found`);
+    }
+
+    const isSuper = await permissionService.isSuperAdmin(userId);
+    const hasCARole = await permissionService.hasRole(userId, 'COMPETENT_AUTHORITY');
+
+    if (!isSuper && !hasCARole) {
+      throw new ForbiddenError(
+        'Forbidden: Only users holding the COMPETENT_AUTHORITY role may scrutinize proposals and record decisions.'
+      );
+    }
+
+    const selectedAuthId =
+      proposal.selectedAuthority?.id ??
+      proposal.currentVersion?.selectedAuthorityId;
+
+    if (!selectedAuthId) {
+      throw new BadRequestError('Proposal does not have a Competent Authority assigned.');
+    }
+
+    if (!isSuper) {
+      const isAssigned = await competentAuthorityRepository.hasActiveAssignment(
+        userId,
+        selectedAuthId
+      );
+      if (!isAssigned) {
+        throw new ForbiddenError(
+          'Forbidden: You are not actively assigned to the Competent Authority handling this proposal.'
+        );
+      }
+    }
+
+    return { proposal, authorityId: selectedAuthId };
+  }
+
+  /**
+   * Starts formal scrutiny review by transitioning a proposal from SUBMITTED to UNDER_REVIEW.
+   */
+  async startReview(proposalId: string, userId: string): Promise<ProposalWithDetails> {
+    const { proposal } = await this.assertCanScrutinizeProposal(proposalId, userId);
+
+    if (proposal.currentStatus === 'UNDER_REVIEW') {
+      return proposal; // Idempotent
+    }
+
+    if (proposal.currentStatus !== 'SUBMITTED') {
+      throw new BadRequestError(
+        `Cannot start review: proposal is in '${proposal.currentStatus}' status. Only SUBMITTED proposals can enter review.`
+      );
+    }
+
+    const currentVer = proposal.currentVersion;
+    if (!currentVer) {
+      throw new NotFoundError('Proposal current version not found');
+    }
+
+    await db.transaction(async (tx: TransactionClient) => {
+      const locked = await acquisitionProposalRepository.findProposalForUpdate(proposalId, tx);
+      if (!locked) {
+        throw new NotFoundError(`Proposal '${proposalId}' not found`);
+      }
+      if (locked.currentStatus !== 'SUBMITTED' && locked.currentStatus !== 'UNDER_REVIEW') {
+        throw new BadRequestError(
+          `Cannot start review: proposal is in '${locked.currentStatus}' status.`
+        );
+      }
+
+      if (locked.currentStatus === 'SUBMITTED') {
+        await acquisitionProposalRepository.updateProposal(
+          proposalId,
+          { currentStatus: 'UNDER_REVIEW' },
+          tx
+        );
+
+        await acquisitionProposalRepository.updateProposalVersion(
+          currentVer.id,
+          { status: 'UNDER_REVIEW' },
+          tx
+        );
+
+        await acquisitionProposalRepository.createWorkflowHistory(
+          {
+            proposalId,
+            versionNumber: currentVer.versionNumber,
+            action: 'START_REVIEW',
+            fromStatus: 'SUBMITTED',
+            toStatus: 'UNDER_REVIEW',
+            actorId: userId,
+            remarks: 'Competent Authority commenced scrutiny examination',
+          },
+          tx
+        );
+      }
+    });
+
+    const updated = await acquisitionProposalRepository.findProposalById(proposalId);
+    if (!updated) {
+      throw new Error('Failed to load updated proposal');
+    }
+    return updated;
+  }
+
+  /**
+   * Records a scrutiny observation against the proposal's current version.
+   * Automatically moves SUBMITTED proposals into UNDER_REVIEW.
+   */
+  async recordObservation(
+    proposalId: string,
+    input: CreateObservationInput,
+    userId: string
+  ): Promise<ProposalScrutinyObservation> {
+    const { proposal } = await this.assertCanScrutinizeProposal(proposalId, userId);
+
+    if (
+      proposal.currentStatus !== 'SUBMITTED' &&
+      proposal.currentStatus !== 'UNDER_REVIEW'
+    ) {
+      throw new BadRequestError(
+        `Cannot record observations: proposal is in '${proposal.currentStatus}' status. Observations can only be recorded during scrutiny review (SUBMITTED or UNDER_REVIEW).`
+      );
+    }
+
+    const currentVer = proposal.currentVersion;
+    if (!currentVer) {
+      throw new NotFoundError('Proposal current version not found');
+    }
+
+    // Automatically transition SUBMITTED to UNDER_REVIEW on first observation
+    if (proposal.currentStatus === 'SUBMITTED') {
+      await this.startReview(proposalId, userId);
+    }
+
+    return acquisitionProposalRepository.createScrutinyObservation({
+      proposalId,
+      proposalVersionId: currentVer.id,
+      observationCategory: input.observationCategory,
+      observationTitle: input.observationTitle.trim(),
+      observationDescription: input.observationDescription.trim(),
+      relatedSection: input.relatedSection?.trim() || null,
+      relatedParcelId: input.relatedParcelId || null,
+      relatedDocumentId: input.relatedDocumentId?.trim() || null,
+      createdBy: userId,
+    });
+  }
+
+  /**
+   * Retrieves scrutiny observations recorded for a proposal, optionally filtered by version.
+   */
+  async listObservations(
+    proposalId: string,
+    versionId?: string,
+    userId?: string
+  ): Promise<
+    (ProposalScrutinyObservation & {
+      author: { id: string; name: string; email: string };
+    })[]
+  > {
+    if (userId) {
+      // Validates accessibility
+      await this.getProposalById(proposalId, userId);
+    }
+
+    return acquisitionProposalRepository.findObservationsByProposalId(proposalId, versionId);
+  }
+
+  /**
+   * Records a formal scrutiny decision (APPROVED, CORRECTION_REQUESTED, REJECTED).
+   * Enforces transactional integrity and concurrency safety.
+   */
+  async recordDecision(
+    proposalId: string,
+    input: RecordDecisionInput,
+    userId: string
+  ): Promise<{
+    proposal: ProposalWithDetails;
+    decision: ProposalScrutinyDecision;
+  }> {
+    const { authorityId } = await this.assertCanScrutinizeProposal(proposalId, userId);
+
+    let recordedDecision: ProposalScrutinyDecision | undefined;
+
+    await db.transaction(async (tx: TransactionClient) => {
+      // 1. Row-lock proposal header
+      const locked = await acquisitionProposalRepository.findProposalForUpdate(proposalId, tx);
+      if (!locked) {
+        throw new NotFoundError(`Proposal '${proposalId}' not found`);
+      }
+
+      if (
+        locked.currentStatus !== 'SUBMITTED' &&
+        locked.currentStatus !== 'UNDER_REVIEW'
+      ) {
+        throw new BadRequestError(
+          `Cannot record decision: proposal is in '${locked.currentStatus}' status. Decisions can only be recorded for proposals under scrutiny review (SUBMITTED or UNDER_REVIEW).`
+        );
+      }
+
+      const currentVerId = locked.currentVersionId;
+      if (!currentVerId) {
+        throw new NotFoundError('Proposal current version ID not found');
+      }
+
+      const currentVer = await acquisitionProposalRepository.findProposalVersionById(
+        currentVerId,
+        tx
+      );
+      if (!currentVer) {
+        throw new NotFoundError('Proposal version not found');
+      }
+
+      // 2. Prevent duplicate decision against the same proposal version
+      const existingDecision = await acquisitionProposalRepository.findDecisionByVersionId(
+        currentVerId,
+        tx
+      );
+      if (existingDecision) {
+        throw new ConflictError(
+          `A scrutiny decision (${existingDecision.decisionType}) has already been recorded for version ${currentVer.versionNumber}.`
+        );
+      }
+
+      const targetStatus = input.decisionType;
+      let workflowAction: 'APPROVE' | 'REQUEST_CORRECTIONS' | 'REJECT';
+
+      if (input.decisionType === 'APPROVED') {
+        workflowAction = 'APPROVE';
+      } else if (input.decisionType === 'CORRECTION_REQUESTED') {
+        workflowAction = 'REQUEST_CORRECTIONS';
+      } else if (input.decisionType === 'REJECTED') {
+        workflowAction = 'REJECT';
+      } else {
+        throw new BadRequestError(`Invalid decision type: ${input.decisionType}`);
+      }
+
+      // 3. Update proposal version with review outcome & remarks
+      await acquisitionProposalRepository.updateProposalVersion(
+        currentVerId,
+        {
+          status: targetStatus,
+          reviewedBy: userId,
+          reviewedAt: new Date(),
+          reviewRemarks: input.decisionRemarks.trim(),
+        },
+        tx
+      );
+
+      // 4. Update proposal header status
+      await acquisitionProposalRepository.updateProposal(
+        proposalId,
+        { currentStatus: targetStatus },
+        tx
+      );
+
+      // 5. Record formal scrutiny decision
+      recordedDecision = await acquisitionProposalRepository.createScrutinyDecision(
+        {
+          proposalId,
+          proposalVersionId: currentVerId,
+          competentAuthorityId: authorityId,
+          decisionType: input.decisionType,
+          decisionRemarks: input.decisionRemarks.trim(),
+          supportingDocuments: input.supportingDocuments ?? null,
+          decidedBy: userId,
+        },
+        tx
+      );
+
+      // 6. Record workflow audit history
+      await acquisitionProposalRepository.createWorkflowHistory(
+        {
+          proposalId,
+          versionNumber: currentVer.versionNumber,
+          action: workflowAction,
+          fromStatus: locked.currentStatus,
+          toStatus: targetStatus,
+          actorId: userId,
+          remarks: input.decisionRemarks.trim(),
+        },
+        tx
+      );
+    });
+
+    const updated = await acquisitionProposalRepository.findProposalById(proposalId);
+    if (!updated || !recordedDecision) {
+      throw new Error('Failed to load updated proposal after decision');
+    }
+
+    return {
+      proposal: updated,
+      decision: recordedDecision,
+    };
+  }
+
+  /**
+   * Retrieves unified chronological history of proposal submissions, reviews,
+   * observations, and decisions.
+   */
+  async getProposalHistory(
+    proposalId: string,
+    userId: string
+  ): Promise<{
+    versions: (AcquisitionProposalVersion & {
+      creator: { id: string; name: string; email: string };
+      submitter?: { id: string; name: string; email: string } | null;
+      reviewer?: { id: string; name: string; email: string } | null;
+    })[];
+    workflowHistory: Array<
+      AcquisitionProposalWorkflowHistory & {
+        actor: { id: string; name: string; email: string };
+      }
+    >;
+    decisions: Array<
+      ProposalScrutinyDecision & {
+        decider: { id: string; name: string; email: string };
+        authority: {
+          id: string;
+          authorityName: string;
+          designation: string;
+          authorityCode: string;
+        };
+      }
+    >;
+    observations: Array<
+      ProposalScrutinyObservation & {
+        author: { id: string; name: string; email: string };
+      }
+    >;
+  }> {
+    // Validates accessibility
+    await this.getProposalById(proposalId, userId);
+
+    const [versions, workflowHistory, decisions, observations] = await Promise.all([
+      acquisitionProposalRepository.findProposalVersions(proposalId),
+      acquisitionProposalRepository.findWorkflowHistoryByProposalId(proposalId),
+      acquisitionProposalRepository.findDecisionsByProposalId(proposalId),
+      acquisitionProposalRepository.findObservationsByProposalId(proposalId),
+    ]);
+
+    return {
+      versions,
+      workflowHistory,
+      decisions,
+      observations,
     };
   }
 }
