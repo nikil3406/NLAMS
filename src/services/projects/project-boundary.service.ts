@@ -11,34 +11,43 @@ import { BadRequestError, NotFoundError, ForbiddenError } from '../../types';
 
 export class ProjectBoundaryService {
   /**
-   * Validates GeoJSON geometry structure, coordinate validity, and measures spheroidal area via PostGIS.
-   * Throws BadRequestError if geometry is malformed, self-intersecting, or non-polygonal.
+   * Validates GeoJSON geometry structure, coordinate validity, and measures spheroidal area or line length via PostGIS.
+   * Supports Polygon, MultiPolygon, and LineString.
    */
   async validateAndMeasureGeometry(geometry: GeoJsonGeometry): Promise<GeometryMeasurement> {
-    if (!geometry || (geometry.type !== 'Polygon' && geometry.type !== 'MultiPolygon')) {
-      throw new BadRequestError('Boundary geometry must be a valid GeoJSON Polygon or MultiPolygon');
+    if (!geometry || (geometry.type !== 'Polygon' && geometry.type !== 'MultiPolygon' && geometry.type !== 'LineString')) {
+      throw new BadRequestError('Boundary geometry must be a valid GeoJSON Polygon, MultiPolygon, or LineString');
     }
 
     if (!geometry.coordinates || !Array.isArray(geometry.coordinates) || geometry.coordinates.length === 0) {
       throw new BadRequestError('Boundary geometry cannot have empty coordinates');
     }
 
+    if (geometry.type === 'LineString' && geometry.coordinates.length < 2) {
+      throw new BadRequestError('LineString geometry must have at least 2 coordinate points');
+    }
+
     const measurement = await projectBoundaryRepository.measureAndValidateGeometry(geometry);
 
     if (!measurement.isValid) {
       throw new BadRequestError(
-        `Invalid geometry: ${measurement.reason ?? 'Polygon contains self-intersections or invalid rings'}`
+        `Invalid geometry: ${measurement.reason ?? 'Geometry contains self-intersections or invalid coordinates'}`
       );
     }
 
-    if (measurement.geometryType !== 'ST_Polygon' && measurement.geometryType !== 'ST_MultiPolygon') {
+    const validTypes = ['ST_Polygon', 'ST_MultiPolygon', 'ST_LineString'];
+    if (!validTypes.includes(measurement.geometryType)) {
       throw new BadRequestError(
-        `Geometry type must be Polygon or MultiPolygon, received '${measurement.geometryType}'`
+        `Geometry type must be Polygon, MultiPolygon, or LineString, received '${measurement.geometryType}'`
       );
     }
 
-    if (measurement.areaSqm <= 0) {
+    if (geometry.type !== 'LineString' && measurement.areaSqm <= 0) {
       throw new BadRequestError('Calculated geometry area must be greater than zero');
+    }
+
+    if (geometry.type === 'LineString' && (measurement.lengthMeters ?? 0) <= 0) {
+      throw new BadRequestError('Calculated line length must be greater than zero');
     }
 
     return measurement;

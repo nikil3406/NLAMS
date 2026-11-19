@@ -134,3 +134,34 @@ export function formatAreaWithUnit(
       return `${numStr} sq m`;
   }
 }
+
+/**
+ * Computes the geodesic length of a GeoJSON LineString in meters.
+ */
+export function calculateGeodesicLengthMeters(
+  geometry: { type: string; coordinates: unknown } | null | undefined
+): number {
+  if (!geometry || !geometry.coordinates || geometry.type !== 'LineString') return 0;
+  const coords = geometry.coordinates as number[][];
+  if (!coords || coords.length < 2) return 0;
+
+  const RADIUS = 6378137;
+  let totalLength = 0;
+  for (let i = 0; i < coords.length - 1; i++) {
+    const pt1 = coords[i];
+    const pt2 = coords[i + 1];
+    if (!pt1 || !pt2) continue;
+    const lon1 = (pt1[0] * Math.PI) / 180;
+    const lat1 = (pt1[1] * Math.PI) / 180;
+    const lon2 = (pt2[0] * Math.PI) / 180;
+    const lat2 = (pt2[1] * Math.PI) / 180;
+    const dLat = lat2 - lat1;
+    const dLon = lon2 - lon1;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    totalLength += RADIUS * c;
+  }
+  return totalLength;
+}

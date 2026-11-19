@@ -11,7 +11,12 @@ export interface GeoJsonMultiPolygon {
   coordinates: number[][][][];
 }
 
-export type GeoJsonGeometry = GeoJsonPolygon | GeoJsonMultiPolygon;
+export interface GeoJsonLineString {
+  type: 'LineString';
+  coordinates: number[][];
+}
+
+export type GeoJsonGeometry = GeoJsonPolygon | GeoJsonMultiPolygon | GeoJsonLineString;
 
 function isValidCoordinate(coord: unknown): coord is [number, number] {
   if (!Array.isArray(coord) || coord.length < 2) return false;
@@ -77,9 +82,30 @@ export const geoJsonMultiPolygonSchema = z
     }
   );
 
+export const geoJsonLineStringSchema = z
+  .object({
+    type: z.literal('LineString'),
+    coordinates: z
+      .array(z.array(z.number()))
+      .min(2, { message: 'LineString must have at least 2 points' }),
+  })
+  .refine(
+    (val) => {
+      for (const pt of val.coordinates) {
+        if (!isValidCoordinate(pt)) return false;
+      }
+      return true;
+    },
+    {
+      message:
+        'Invalid LineString geometry: all coordinates must have valid lat/long (-180 to 180, -90 to 90).',
+    }
+  );
+
 export const geoJsonGeometrySchema = z.union([
   geoJsonPolygonSchema,
   geoJsonMultiPolygonSchema,
+  geoJsonLineStringSchema,
 ]);
 
 export const projectBoundaryInputSchema = z.object({

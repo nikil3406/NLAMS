@@ -3,7 +3,7 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import type { GeoJsonGeometry } from '../../validators/spatial/boundary.schema';
-import { calculateGeodesicAreaSqm } from '../../lib/geo-utils';
+import { calculateGeodesicAreaSqm, calculateGeodesicLengthMeters } from '../../lib/geo-utils';
 
 import 'maplibre-gl/dist/maplibre-gl.css';
 import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css';
@@ -44,14 +44,24 @@ export function ProjectBoundaryMap({
   const [calculatedAreaSqm, setCalculatedAreaSqm] = useState<number>(() =>
     calculateGeodesicAreaSqm(initialGeometry)
   );
+  const [calculatedLengthMeters, setCalculatedLengthMeters] = useState<number>(() =>
+    calculateGeodesicLengthMeters(initialGeometry)
+  );
   const [serverAreaSqm, setServerAreaSqm] = useState<number | null>(null);
+  const [serverLengthMeters, setServerLengthMeters] = useState<number>(0);
   const [isValidatingServer, setIsValidatingServer] = useState(false);
-  const [activeDrawMode, setActiveDrawMode] = useState<'simple_select' | 'draw_polygon'>('simple_select');
 
-  // Verify and measure area via server PostGIS
+  // Selected tool tab: 'polygon' | 'line'
+  const [selectedTool, setSelectedTool] = useState<'polygon' | 'line'>(() =>
+    initialGeometry?.type === 'LineString' ? 'line' : 'polygon'
+  );
+  const [activeDrawMode, setActiveDrawMode] = useState<string>('simple_select');
+
+  // Verify and measure area/length via server PostGIS
   const verifyServerArea = useCallback(async (geometry: GeoJsonGeometry | null) => {
     if (!geometry) {
       setServerAreaSqm(null);
+      setServerLengthMeters(0);
       return;
     }
 
@@ -65,8 +75,13 @@ export function ProjectBoundaryMap({
 
       if (res.ok) {
         const json = await res.json();
-        if (json.success && json.data?.areaSqm !== undefined) {
-          setServerAreaSqm(json.data.areaSqm);
+        if (json.success && json.data) {
+          if (json.data.areaSqm !== undefined) {
+            setServerAreaSqm(json.data.areaSqm);
+          }
+          if (json.data.lengthMeters !== undefined) {
+            setServerLengthMeters(json.data.lengthMeters);
+          }
         }
       }
     } catch {
@@ -82,6 +97,15 @@ export function ProjectBoundaryMap({
       setCurrentGeometry(geom);
       const area = calculateGeodesicAreaSqm(geom);
       setCalculatedAreaSqm(area);
+      const len = calculateGeodesicLengthMeters(geom);
+      setCalculatedLengthMeters(len);
+
+      if (geom?.type === 'LineString') {
+        setSelectedTool('line');
+      } else if (geom?.type === 'Polygon' || geom?.type === 'MultiPolygon') {
+        setSelectedTool('polygon');
+      }
+
       if (onChange) {
         onChange(geom, area);
       }
@@ -89,6 +113,7 @@ export function ProjectBoundaryMap({
         verifyServerArea(geom);
       } else {
         setServerAreaSqm(null);
+        setServerLengthMeters(0);
       }
     },
     [onChange, verifyServerArea]
@@ -162,25 +187,20 @@ export function ProjectBoundaryMap({
           setIsMapLoaded(true);
 
           if (!readOnly) {
-            // Custom modes ensuring ALL vertices are emitted with exact coordinates
-            // during drawing AND after double-click completion, without premature termination
             const customModes = {
               ...MapboxDraw.modes,
               draw_polygon: {
                 ...MapboxDraw.modes.draw_polygon,
                 clickOnVertex(state: any, e: any) {
-                  // Only allow closing if we have at least 3 points placed AND the vertex clicked is the starting vertex '0.0'
                   const isStartVertex = e?.featureTarget?.properties?.coord_path === '0.0';
                   if (state.currentVertexPosition >= 2 && isStartVertex) {
                     return (this as any).changeMode(MapboxDraw.constants.modes.SIMPLE_SELECT, {
                       featureIds: [state.polygon.id],
                     });
                   }
-                  // Do not close or delete if fewer than 3 points are placed
                   return (this as any).clickAnywhere(state, e);
                 },
                 clickAnywhere(state: any, e: any) {
-                  // Only allow double-click close if at least 3 points have been placed
                   const isEventAtCoords = (MapboxDraw as any).lib.isEventAtCoordinates;
                   if (
                     state.currentVertexPosition >= 2 &&
@@ -208,7 +228,6 @@ export function ProjectBoundaryMap({
 
                   geojson.properties.meta = 'feature';
 
-                  // Emit start vertex with meta: 'vertex' (interactive target for closing)
                   display((MapboxDraw as any).lib.createVertex(
                     state.polygon.id,
                     geojson.geometry.coordinates[0][0],
@@ -216,8 +235,6 @@ export function ProjectBoundaryMap({
                     false
                   ));
 
-                  // Emit all other fixed vertices with meta: 'vertex-display'
-                  // so they are visible on the map, but cannot be accidentally clicked as closing targets
                   const numFixedPoints = coordinateCount - 1;
                   for (let i = 1; i < numFixedPoints; i++) {
                     display({
@@ -261,7 +278,6 @@ export function ProjectBoundaryMap({
                   display(geojson);
                   (this as any).fireActionable();
                   if (geojson.geometry.type === 'Point') return;
-                  // Always emit vertices for completed polygons so they remain visible after double-click
                   const suppPoints = (MapboxDraw as any).lib.createSupplementaryPoints(geojson, { midpoints: false });
                   suppPoints.forEach(display);
                 },
@@ -331,7 +347,18 @@ export function ProjectBoundaryMap({
                   paint: {
                     'line-color': '#2563eb',
                     'line-dasharray': [0.2, 2],
-                    'line-width': 2.5,
+                    'line-width': 3.5,
+                  },
+                },
+                // === Line (completed / inactive) ===
+                {
+                  id: 'gl-draw-line-inactive',
+                  type: 'line',
+                  filter: ['all', ['==', '$type', 'LineString'], ['==', 'active', 'false'], ['!=', 'mode', 'static']],
+                  layout: { 'line-cap': 'round', 'line-join': 'round' },
+                  paint: {
+                    'line-color': '#2563eb',
+                    'line-width': 3.5,
                   },
                 },
                 // === Midpoints (orange dot between vertices if editing) ===
@@ -346,7 +373,7 @@ export function ProjectBoundaryMap({
                     'circle-stroke-color': '#ffffff',
                   },
                 },
-                // === First Vertex Highlight (start point to click for closing) ===
+                // === First Vertex Highlight (start point to click for closing polygon) ===
                 {
                   id: 'gl-draw-first-vertex-highlight',
                   type: 'circle',
@@ -370,7 +397,7 @@ export function ProjectBoundaryMap({
                     'circle-stroke-color': '#2563eb',
                   },
                 },
-                // === Vertex Points Inner Core (crisp center pin) ===
+                // === Vertex Points Inner Core ===
                 {
                   id: 'gl-draw-polygon-vertex-inner',
                   type: 'circle',
@@ -406,19 +433,13 @@ export function ProjectBoundaryMap({
                 geometry: initialGeometry as any,
               });
 
-              // Fit bounds to polygon
-              try {
-                fitGeometryBounds(map, initialGeometry);
-              } catch {
-                /* ignore */
-              }
+              fitGeometryBounds(map, initialGeometry);
             }
 
             // ─── Draw event listeners ─────────────────────────────────────────
             const syncDraw = () => {
               const allFeatures = draw.getAll();
               if (allFeatures.features.length > 0) {
-                // Take latest polygon feature
                 const latestFeature = allFeatures.features[allFeatures.features.length - 1];
                 const geom = latestFeature.geometry as unknown as GeoJsonGeometry;
                 handleGeometryUpdate(geom);
@@ -438,76 +459,114 @@ export function ProjectBoundaryMap({
           } else {
             // Read-only mode: render geometry layer directly
             if (initialGeometry) {
-              map.addSource('readonly-boundary', {
-                type: 'geojson',
-                data: {
-                  type: 'Feature',
-                  properties: {},
-                  geometry: initialGeometry as any,
-                },
-              });
-
-              map.addLayer({
-                id: 'readonly-boundary-fill',
-                type: 'fill',
-                source: 'readonly-boundary',
-                paint: {
-                  'fill-color': '#3b82f6',
-                  'fill-opacity': 0.2,
-                },
-              });
-
-              map.addLayer({
-                id: 'readonly-boundary-line',
-                type: 'line',
-                source: 'readonly-boundary',
-                paint: {
-                  'line-color': '#2563eb',
-                  'line-width': 2.5,
-                },
-              });
-
-              // Also render vertices in read-only mode
-              const coords =
-                initialGeometry.type === 'Polygon'
-                  ? initialGeometry.coordinates[0]
-                  : initialGeometry.type === 'MultiPolygon'
-                  ? initialGeometry.coordinates[0][0]
-                  : [];
-              if (coords.length > 0) {
-                map.addSource('readonly-vertices', {
+              if (initialGeometry.type === 'LineString') {
+                map.addSource('readonly-boundary', {
                   type: 'geojson',
                   data: {
-                    type: 'FeatureCollection',
-                    features: coords.slice(0, -1).map((pt: any) => ({
-                      type: 'Feature',
-                      properties: {},
-                      geometry: { type: 'Point', coordinates: pt },
-                    })),
+                    type: 'Feature',
+                    properties: {},
+                    geometry: initialGeometry as any,
                   },
                 });
 
                 map.addLayer({
-                  id: 'readonly-vertices-outer',
-                  type: 'circle',
-                  source: 'readonly-vertices',
+                  id: 'readonly-boundary-line',
+                  type: 'line',
+                  source: 'readonly-boundary',
+                  layout: { 'line-cap': 'round', 'line-join': 'round' },
                   paint: {
-                    'circle-radius': 6.5,
-                    'circle-color': '#ffffff',
-                    'circle-stroke-width': 2.5,
-                    'circle-stroke-color': '#2563eb',
+                    'line-color': '#2563eb',
+                    'line-width': 3.5,
+                  },
+                });
+
+                const coords = initialGeometry.coordinates;
+                if (coords && coords.length > 0) {
+                  map.addSource('readonly-vertices', {
+                    type: 'geojson',
+                    data: {
+                      type: 'FeatureCollection',
+                      features: coords.map((pt: any) => ({
+                        type: 'Feature',
+                        properties: {},
+                        geometry: { type: 'Point', coordinates: pt },
+                      })),
+                    },
+                  });
+
+                  map.addLayer({
+                    id: 'readonly-vertex-circles',
+                    type: 'circle',
+                    source: 'readonly-vertices',
+                    paint: {
+                      'circle-radius': 5,
+                      'circle-color': '#ffffff',
+                      'circle-stroke-width': 2,
+                      'circle-stroke-color': '#2563eb',
+                    },
+                  });
+                }
+              } else {
+                map.addSource('readonly-boundary', {
+                  type: 'geojson',
+                  data: {
+                    type: 'Feature',
+                    properties: {},
+                    geometry: initialGeometry as any,
                   },
                 });
 
                 map.addLayer({
-                  id: 'readonly-vertices-inner',
-                  type: 'circle',
-                  source: 'readonly-vertices',
+                  id: 'readonly-boundary-fill',
+                  type: 'fill',
+                  source: 'readonly-boundary',
                   paint: {
-                    'circle-radius': 3,
-                    'circle-color': '#2563eb',
+                    'fill-color': '#3b82f6',
+                    'fill-opacity': 0.2,
                   },
                 });
+
+                map.addLayer({
+                  id: 'readonly-boundary-stroke',
+                  type: 'line',
+                  source: 'readonly-boundary',
+                  paint: {
+                    'line-color': '#2563eb',
+                    'line-width': 2.5,
+                  },
+                });
+
+                const coords =
+                  initialGeometry.type === 'Polygon'
+                    ? initialGeometry.coordinates[0]
+                    : initialGeometry.type === 'MultiPolygon'
+                    ? initialGeometry.coordinates[0][0]
+                    : [];
+                if (coords.length > 0) {
+                  map.addSource('readonly-vertices', {
+                    type: 'geojson',
+                    data: {
+                      type: 'FeatureCollection',
+                      features: coords.slice(0, -1).map((pt: any) => ({
+                        type: 'Feature',
+                        properties: {},
+                        geometry: { type: 'Point', coordinates: pt },
+                      })),
+                    },
+                  });
+
+                  map.addLayer({
+                    id: 'readonly-vertex-circles',
+                    type: 'circle',
+                    source: 'readonly-vertices',
+                    paint: {
+                      'circle-radius': 4.5,
+                      'circle-color': '#ffffff',
+                      'circle-stroke-width': 2,
+                      'circle-stroke-color': '#2563eb',
+                    },
+                  });
+                }
               }
 
               fitGeometryBounds(map, initialGeometry);
@@ -548,6 +607,13 @@ export function ProjectBoundaryMap({
         setCurrentGeometry(initialGeometry);
         const area = calculateGeodesicAreaSqm(initialGeometry);
         setCalculatedAreaSqm(area);
+        const len = calculateGeodesicLengthMeters(initialGeometry);
+        setCalculatedLengthMeters(len);
+        if (initialGeometry.type === 'LineString') {
+          setSelectedTool('line');
+        } else {
+          setSelectedTool('polygon');
+        }
         verifyServerArea(initialGeometry);
         if (mapInstanceRef.current) {
           fitGeometryBounds(mapInstanceRef.current, initialGeometry);
@@ -567,7 +633,7 @@ export function ProjectBoundaryMap({
     }
   }, [isMapLoaded, initialGeometry, readOnly, verifyServerArea]);
 
-  // Helper to fit map bounds to geometry
+  // Helper to fit map bounds to geometry (Polygon or LineString)
   function fitGeometryBounds(map: any, geom: GeoJsonGeometry) {
     if (!geom || !geom.coordinates) return;
     const lons: number[] = [];
@@ -584,7 +650,7 @@ export function ProjectBoundaryMap({
 
     extractPoints(geom.coordinates);
 
-    if (lons.length >= 3) {
+    if (lons.length >= 2) {
       const minLng = Math.min(...lons);
       const maxLng = Math.max(...lons);
       const minLat = Math.min(...lats);
@@ -601,12 +667,39 @@ export function ProjectBoundaryMap({
   }
 
   // Draw controls actions
-  const handleStartDraw = () => {
+  const handleStartDrawPolygon = () => {
     if (!drawInstanceRef.current) return;
     drawInstanceRef.current.deleteAll();
     drawInstanceRef.current.changeMode('draw_polygon');
     setActiveDrawMode('draw_polygon');
     handleGeometryUpdate(null);
+  };
+
+  const handleStartDrawLine = () => {
+    if (!drawInstanceRef.current) return;
+    drawInstanceRef.current.deleteAll();
+    drawInstanceRef.current.changeMode('draw_line_string');
+    setActiveDrawMode('draw_line_string');
+    handleGeometryUpdate(null);
+  };
+
+  const handleFinishLine = () => {
+    if (!drawInstanceRef.current) return;
+    drawInstanceRef.current.changeMode('simple_select');
+  };
+
+  const handleCancelDraw = () => {
+    if (!drawInstanceRef.current) return;
+    drawInstanceRef.current.deleteAll();
+    if (currentGeometry) {
+      drawInstanceRef.current.add({
+        type: 'Feature',
+        properties: {},
+        geometry: currentGeometry as any,
+      });
+    }
+    drawInstanceRef.current.changeMode('simple_select');
+    setActiveDrawMode('simple_select');
   };
 
   const handleClear = () => {
@@ -631,23 +724,166 @@ export function ProjectBoundaryMap({
     <div className="project-map-wrapper" style={{ width: '100%', position: 'relative' }}>
       {/* Top Map Toolbar */}
       {!readOnly && (
-        <div className="map-toolbar-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-            <button
-              type="button"
-              className={activeDrawMode === 'draw_polygon' ? 'btn-primary' : 'btn-secondary'}
-              onClick={handleStartDraw}
-              id="btn-draw-polygon"
-              style={{ padding: '0.4rem 0.85rem', fontSize: '0.8125rem' }}
+        <div
+          className="map-toolbar-row"
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: '0.75rem',
+            flexWrap: 'wrap',
+            gap: '0.5rem',
+          }}
+        >
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            {/* Drawing Mode Selector (Polygon vs Line) */}
+            <div
+              style={{
+                display: 'inline-flex',
+                borderRadius: '6px',
+                border: '1px solid var(--border-color)',
+                backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                padding: '2px',
+                marginRight: '0.25rem',
+              }}
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: '0.35rem' }}>
-                <polygon points="12 2 2 7 12 12 22 7 12 2" />
-                <polyline points="2 17 12 22 22 17" />
-                <polyline points="2 12 12 17 22 12" />
-              </svg>
-              <span>{currentGeometry ? 'Redraw Polygon' : 'Draw Polygon Boundary'}</span>
-            </button>
+              <button
+                type="button"
+                id="mode-polygon"
+                onClick={() => {
+                  setSelectedTool('polygon');
+                  if (activeDrawMode === 'draw_line_string') {
+                    handleCancelDraw();
+                  }
+                }}
+                style={{
+                  padding: '0.35rem 0.75rem',
+                  fontSize: '0.8125rem',
+                  borderRadius: '4px',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontWeight: selectedTool === 'polygon' ? 600 : 400,
+                  backgroundColor: selectedTool === 'polygon' ? 'var(--accent-primary)' : 'transparent',
+                  color: selectedTool === 'polygon' ? '#fff' : 'var(--text-secondary)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.35rem',
+                }}
+              >
+                <span>⬡ Polygon (Area)</span>
+              </button>
+              <button
+                type="button"
+                id="mode-line"
+                onClick={() => {
+                  setSelectedTool('line');
+                  if (activeDrawMode === 'draw_polygon') {
+                    handleCancelDraw();
+                  }
+                }}
+                style={{
+                  padding: '0.35rem 0.75rem',
+                  fontSize: '0.8125rem',
+                  borderRadius: '4px',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontWeight: selectedTool === 'line' ? 600 : 400,
+                  backgroundColor: selectedTool === 'line' ? 'var(--accent-primary)' : 'transparent',
+                  color: selectedTool === 'line' ? '#fff' : 'var(--text-secondary)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.35rem',
+                }}
+              >
+                <span>／ Line (Alignment)</span>
+              </button>
+            </div>
 
+            {/* Polygon Tool Actions */}
+            {selectedTool === 'polygon' && (
+              <>
+                <button
+                  type="button"
+                  className={activeDrawMode === 'draw_polygon' ? 'btn-primary' : 'btn-secondary'}
+                  onClick={handleStartDrawPolygon}
+                  id="btn-draw-polygon"
+                  style={{ padding: '0.4rem 0.85rem', fontSize: '0.8125rem' }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: '0.35rem' }}>
+                    <polygon points="12 2 2 7 12 12 22 7 12 2" />
+                    <polyline points="2 17 12 22 22 17" />
+                    <polyline points="2 12 12 17 22 12" />
+                  </svg>
+                  <span>
+                    {currentGeometry?.type === 'Polygon' || currentGeometry?.type === 'MultiPolygon'
+                      ? 'Redraw Polygon'
+                      : 'Draw Polygon'}
+                  </span>
+                </button>
+                {activeDrawMode === 'draw_polygon' && (
+                  <button
+                    type="button"
+                    className="btn-cancel"
+                    onClick={handleCancelDraw}
+                    id="btn-cancel-draw-polygon"
+                    style={{ padding: '0.4rem 0.85rem', fontSize: '0.8125rem' }}
+                  >
+                    <span>Cancel</span>
+                  </button>
+                )}
+              </>
+            )}
+
+            {/* Line Tool Actions */}
+            {selectedTool === 'line' && (
+              <>
+                <button
+                  type="button"
+                  className={activeDrawMode === 'draw_line_string' ? 'btn-primary' : 'btn-secondary'}
+                  onClick={handleStartDrawLine}
+                  id="btn-draw-line"
+                  style={{ padding: '0.4rem 0.85rem', fontSize: '0.8125rem' }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: '0.35rem' }}>
+                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                  </svg>
+                  <span>{currentGeometry?.type === 'LineString' ? 'Redraw Line' : 'Draw Line Alignment'}</span>
+                </button>
+
+                {activeDrawMode === 'draw_line_string' && (
+                  <>
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      onClick={handleFinishLine}
+                      id="btn-finish-line"
+                      style={{
+                        padding: '0.4rem 0.85rem',
+                        fontSize: '0.8125rem',
+                        backgroundColor: '#10b981',
+                        borderColor: '#10b981',
+                      }}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: '0.35rem' }}>
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                      <span>Finish Line</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-cancel"
+                      onClick={handleCancelDraw}
+                      id="btn-cancel-draw-line"
+                      style={{ padding: '0.4rem 0.85rem', fontSize: '0.8125rem' }}
+                    >
+                      <span>Cancel</span>
+                    </button>
+                  </>
+                )}
+              </>
+            )}
+
+            {/* Clear button if geometry exists */}
             {currentGeometry && (
               <button
                 type="button"
@@ -660,7 +896,7 @@ export function ProjectBoundaryMap({
                   <polyline points="3 6 5 6 21 6" />
                   <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                 </svg>
-                <span>Clear Boundary</span>
+                <span>Clear {currentGeometry.type === 'LineString' ? 'Line' : 'Boundary'}</span>
               </button>
             )}
 
@@ -680,6 +916,12 @@ export function ProjectBoundaryMap({
             <div style={{ fontSize: '0.75rem', color: 'var(--status-warning)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
               <span className="spinner-sm" style={{ width: '12px', height: '12px' }} />
               <span>Click map to add polygon vertices. Double-click or click first point to close.</span>
+            </div>
+          )}
+          {activeDrawMode === 'draw_line_string' && (
+            <div style={{ fontSize: '0.75rem', color: 'var(--status-warning)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+              <span className="spinner-sm" style={{ width: '12px', height: '12px' }} />
+              <span>Click points along alignment. Click &quot;Finish Line&quot; or press Enter / double-click to complete.</span>
             </div>
           )}
         </div>
@@ -726,7 +968,7 @@ export function ProjectBoundaryMap({
         )}
       </div>
 
-      {/* Spheroidal Area Display Card */}
+      {/* Geometry Display Card */}
       {currentGeometry && (
         <div
           className="map-area-summary-card"
@@ -743,7 +985,7 @@ export function ProjectBoundaryMap({
             gap: '0.5rem',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
             <span
               style={{
                 display: 'inline-block',
@@ -753,19 +995,40 @@ export function ProjectBoundaryMap({
                 backgroundColor: 'var(--status-active)',
               }}
             />
-            <span style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
-              Calculated Geometry Area (PostGIS / Spheroidal):
-            </span>
-            <strong style={{ fontSize: '0.9375rem', color: '#fff' }} id="calculated-geometry-area-val">
-              {(serverAreaSqm ?? calculatedAreaSqm).toLocaleString('en-IN', {
-                maximumFractionDigits: 2,
-              })}{' '}
-              sq m
-            </strong>
-            <span style={{ fontSize: '0.8125rem', color: 'var(--accent-secondary)' }}>
-              ({((serverAreaSqm ?? calculatedAreaSqm) / 10000).toFixed(4)} ha /{' '}
-              {((serverAreaSqm ?? calculatedAreaSqm) / 4046.8564224).toFixed(4)} acres)
-            </span>
+            {currentGeometry.type === 'LineString' ? (
+              <>
+                <span style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
+                  Linear Infrastructure Alignment:
+                </span>
+                <span className="role-tag-badge" style={{ backgroundColor: 'rgba(59, 130, 246, 0.2)', color: '#60a5fa' }}>
+                  LineString
+                </span>
+                <strong style={{ fontSize: '0.9375rem', color: '#fff' }} id="calculated-line-length-val">
+                  {serverLengthMeters > 0
+                    ? `${(serverLengthMeters / 1000).toFixed(3)} km (${serverLengthMeters.toLocaleString('en-IN', { maximumFractionDigits: 1 })} m)`
+                    : `${(calculatedLengthMeters / 1000).toFixed(3)} km (${calculatedLengthMeters.toLocaleString('en-IN', { maximumFractionDigits: 1 })} m)`}
+                </strong>
+              </>
+            ) : (
+              <>
+                <span style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
+                  Calculated Geometry Area (PostGIS / Spheroidal):
+                </span>
+                <span className="role-tag-badge" style={{ backgroundColor: 'rgba(59, 130, 246, 0.2)', color: '#60a5fa' }}>
+                  {currentGeometry.type}
+                </span>
+                <strong style={{ fontSize: '0.9375rem', color: '#fff' }} id="calculated-geometry-area-val">
+                  {(serverAreaSqm ?? calculatedAreaSqm).toLocaleString('en-IN', {
+                    maximumFractionDigits: 2,
+                  })}{' '}
+                  sq m
+                </strong>
+                <span style={{ fontSize: '0.8125rem', color: 'var(--accent-secondary)' }}>
+                  ({((serverAreaSqm ?? calculatedAreaSqm) / 10000).toFixed(4)} ha /{' '}
+                  {((serverAreaSqm ?? calculatedAreaSqm) / 4046.8564224).toFixed(4)} acres)
+                </span>
+              </>
+            )}
           </div>
 
           {isValidatingServer && (

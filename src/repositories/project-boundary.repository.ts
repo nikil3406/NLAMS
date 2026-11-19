@@ -25,6 +25,7 @@ export interface GeometryMeasurement {
   reason: string | null;
   geometryType: string;
   areaSqm: number;
+  lengthMeters?: number;
 }
 
 type TransactionClient = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -58,12 +59,14 @@ export class ProjectBoundaryRepository {
       reason: string | null;
       geom_type: string;
       area_sqm: number | string;
+      length_meters: number | string;
     }>(sql`
       SELECT
         ST_IsValid(ST_SetSRID(ST_GeomFromGeoJSON(${geoJsonStr}), 4326)) AS is_valid,
         ST_IsValidReason(ST_SetSRID(ST_GeomFromGeoJSON(${geoJsonStr}), 4326)) AS reason,
         ST_GeometryType(ST_SetSRID(ST_GeomFromGeoJSON(${geoJsonStr}), 4326)) AS geom_type,
-        ST_Area(ST_SetSRID(ST_GeomFromGeoJSON(${geoJsonStr}), 4326)::geography) AS area_sqm
+        ST_Area(ST_SetSRID(ST_GeomFromGeoJSON(${geoJsonStr}), 4326)::geography) AS area_sqm,
+        ST_Length(ST_SetSRID(ST_GeomFromGeoJSON(${geoJsonStr}), 4326)::geography) AS length_meters
     `);
 
     const row = result[0];
@@ -76,6 +79,7 @@ export class ProjectBoundaryRepository {
       reason: row.reason,
       geometryType: String(row.geom_type ?? ''),
       areaSqm: Number(row.area_sqm ?? 0),
+      lengthMeters: Number(row.length_meters ?? 0),
     };
   }
 

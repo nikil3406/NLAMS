@@ -50,6 +50,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const areaHectares = Number((areaSqm / 10000).toFixed(4));
     const areaAcres = Number((areaSqm / 4046.8564224).toFixed(4));
     const areaSqKm = Number((areaSqm / 1000000).toFixed(4));
+    const lengthMeters = measurement.lengthMeters ? Number(measurement.lengthMeters.toFixed(2)) : 0;
+    const lengthKm = measurement.lengthMeters ? Number((measurement.lengthMeters / 1000).toFixed(3)) : 0;
 
     return NextResponse.json(
       {
@@ -59,6 +61,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           areaHectares,
           areaAcres,
           areaSqKm,
+          lengthMeters,
+          lengthKm,
           geometryType: measurement.geometryType,
           isValid: measurement.isValid,
         },
