@@ -321,22 +321,53 @@ export class ProjectService {
       await implementingAgencyService.validateActiveAgency(input.implementingAgencyId);
     }
 
-    // 6. Update database record
-    await projectRepository.updateProject(projectId, {
-      name: input.name ?? project.name,
-      description: input.description !== undefined ? input.description : project.description,
-      projectType: input.projectType ?? project.projectType,
-      implementingAgencyId: input.implementingAgencyId ?? project.implementingAgencyId,
-      administrativeUnitId: input.administrativeUnitId ?? project.administrativeUnitId,
-      landAcquisitionRequired:
-        input.landAcquisitionRequired !== undefined
-          ? input.landAcquisitionRequired
-          : project.landAcquisitionRequired,
-      estimatedCost: input.estimatedCost !== undefined ? input.estimatedCost : project.estimatedCost,
-      plannedStartDate:
-        input.plannedStartDate !== undefined ? input.plannedStartDate : project.plannedStartDate,
-      plannedEndDate:
-        input.plannedEndDate !== undefined ? input.plannedEndDate : project.plannedEndDate,
+    // 6. Pre-validate and measure geometry if boundary is provided
+    let measurement: { areaSqm: number } | null = null;
+    if (input.boundary && input.boundary.geometry) {
+      measurement = await projectBoundaryService.validateAndMeasureGeometry(input.boundary.geometry);
+    }
+
+    // 7. Update database record and optional boundary version atomically
+    await db.transaction(async (tx) => {
+      await projectRepository.updateProject(
+        projectId,
+        {
+          name: input.name ?? project.name,
+          description: input.description !== undefined ? input.description : project.description,
+          projectType: input.projectType ?? project.projectType,
+          implementingAgencyId: input.implementingAgencyId ?? project.implementingAgencyId,
+          administrativeUnitId: input.administrativeUnitId ?? project.administrativeUnitId,
+          landAcquisitionRequired:
+            input.landAcquisitionRequired !== undefined
+              ? input.landAcquisitionRequired
+              : project.landAcquisitionRequired,
+          estimatedCost: input.estimatedCost !== undefined ? input.estimatedCost : project.estimatedCost,
+          plannedStartDate:
+            input.plannedStartDate !== undefined ? input.plannedStartDate : project.plannedStartDate,
+          plannedEndDate:
+            input.plannedEndDate !== undefined ? input.plannedEndDate : project.plannedEndDate,
+        },
+        tx
+      );
+
+      if (input.boundary && input.boundary.geometry && measurement) {
+        const nextVersion = await projectBoundaryRepository.getNextVersionNumber(projectId, tx);
+        await projectBoundaryRepository.createBoundaryVersion(
+          {
+            projectId,
+            versionNumber: nextVersion,
+            geometry: input.boundary.geometry,
+            estimatedLandArea: input.boundary.estimatedLandArea,
+            estimatedAreaUnit: input.boundary.estimatedAreaUnit,
+            calculatedGeometryArea: measurement.areaSqm.toFixed(2),
+            createdBy: userId,
+            changeReason:
+              input.boundary.changeReason ??
+              `Boundary updated during project edit (v${nextVersion})`,
+          },
+          tx
+        );
+      }
     });
 
     const updated = await projectRepository.findProjectById(projectId);

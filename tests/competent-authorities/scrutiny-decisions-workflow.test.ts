@@ -305,7 +305,6 @@ describe('NLAMS – Step 3C: Competent Authority Scrutiny, Decisions & Workflow 
         authorityLevel: 'DISTRICT',
         status: 'ACTIVE',
         effectiveFrom: '2025-01-01',
-        createdBy: superAdminId,
       })
       .returning();
     authorityId = auth.id;

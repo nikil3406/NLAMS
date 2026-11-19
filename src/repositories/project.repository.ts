@@ -15,6 +15,8 @@ import {
   type BoundaryRecord,
 } from './project-boundary.repository';
 
+type TransactionClient = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 export interface ProjectFilterOptions {
   search?: string;
   status?: ProjectStatus | string;
@@ -288,8 +290,13 @@ export class ProjectRepository {
   /**
    * Updates an existing project record.
    */
-  async updateProject(id: string, data: Partial<NewProject>): Promise<Project | null> {
-    const [updated] = await db
+  async updateProject(
+    id: string,
+    data: Partial<NewProject>,
+    txClient?: TransactionClient
+  ): Promise<Project | null> {
+    const executor = (txClient ?? db) as typeof db;
+    const [updated] = await executor
       .update(projects)
       .set({
         ...data,

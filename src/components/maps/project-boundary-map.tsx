@@ -533,6 +533,40 @@ export function ProjectBoundaryMap({
     };
   }, []); // Run on mount
 
+  // Synchronize initialGeometry when map/draw is ready or when initialGeometry arrives asynchronously
+  useEffect(() => {
+    if (!isMapLoaded || !initialGeometry) return;
+
+    if (!readOnly && drawInstanceRef.current) {
+      const allFeatures = drawInstanceRef.current.getAll();
+      if (!allFeatures || allFeatures.features.length === 0) {
+        drawInstanceRef.current.add({
+          type: 'Feature',
+          properties: {},
+          geometry: initialGeometry as any,
+        });
+        setCurrentGeometry(initialGeometry);
+        const area = calculateGeodesicAreaSqm(initialGeometry);
+        setCalculatedAreaSqm(area);
+        verifyServerArea(initialGeometry);
+        if (mapInstanceRef.current) {
+          fitGeometryBounds(mapInstanceRef.current, initialGeometry);
+        }
+      }
+    } else if (readOnly && mapInstanceRef.current) {
+      const map = mapInstanceRef.current;
+      const source = map.getSource('readonly-boundary');
+      if (source && typeof source.setData === 'function') {
+        source.setData({
+          type: 'Feature',
+          properties: {},
+          geometry: initialGeometry as any,
+        });
+        fitGeometryBounds(map, initialGeometry);
+      }
+    }
+  }, [isMapLoaded, initialGeometry, readOnly, verifyServerArea]);
+
   // Helper to fit map bounds to geometry
   function fitGeometryBounds(map: any, geom: GeoJsonGeometry) {
     if (!geom || !geom.coordinates) return;
