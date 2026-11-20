@@ -65,19 +65,12 @@ export class AdministrativeUnitService {
     }
 
     // For scoped users, resolve all authorized units (assigned units + all descendants)
-    const assignedUnits = await scopeService.getUserAssignedUnits(actorUserId);
-    if (assignedUnits.length === 0) {
+    const allowedIds = await scopeService.getAllowedUnitIdsForUser(actorUserId);
+    if (!allowedIds || allowedIds.length === 0) {
       return [];
     }
 
-    const authorizedUnitIds = new Set<string>();
-    for (const unit of assignedUnits) {
-      const descendantIds = await administrativeUnitRepository.getDescendantUnitIds(unit.id);
-      for (const id of descendantIds) {
-        authorizedUnitIds.add(id);
-      }
-    }
-
+    const authorizedUnitIds = new Set(allowedIds);
     const allUnits = await administrativeUnitRepository.getAllAdministrativeUnits(options);
     return allUnits.filter((unit) => authorizedUnitIds.has(unit.id));
   }

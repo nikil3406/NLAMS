@@ -1,3 +1,4 @@
+import { cache } from 'react';
 import { roleRepository } from '../../repositories/role.repository';
 import { permissionRepository } from '../../repositories/permission.repository';
 import { ForbiddenError } from '../../types/authorization';
@@ -8,11 +9,12 @@ import { ForbiddenError } from '../../types/authorization';
 export class PermissionService {
   /**
    * Retrieves all role names assigned to a user.
+   * Memoized per request.
    */
-  async getUserRoles(userId: string): Promise<string[]> {
+  getUserRoles = cache(async (userId: string): Promise<string[]> => {
     const roles = await roleRepository.findRolesByUserId(userId);
     return roles.map((r) => r.name);
-  }
+  });
 
   /**
    * Checks whether a user holds a specific role.
@@ -31,11 +33,12 @@ export class PermissionService {
 
   /**
    * Retrieves all unique permission names granted to a user through their roles.
+   * Memoized per request.
    */
-  async getUserPermissions(userId: string): Promise<string[]> {
+  getUserPermissions = cache(async (userId: string): Promise<string[]> => {
     const perms = await permissionRepository.findPermissionsByUserId(userId);
     return perms.map((p) => p.name);
-  }
+  });
 
   /**
    * Evaluates if a user possesses a specific permission.

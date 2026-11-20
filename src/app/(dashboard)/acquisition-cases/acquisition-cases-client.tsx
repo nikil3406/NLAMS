@@ -117,8 +117,11 @@ export function AcquisitionCasesClient({
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setPage(1);
-    loadCases();
+    if (page === 1) {
+      loadCases();
+    } else {
+      setPage(1);
+    }
   };
 
   const handleResetFilters = () => {

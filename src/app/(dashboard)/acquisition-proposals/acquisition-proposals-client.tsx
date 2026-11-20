@@ -135,8 +135,11 @@ export function AcquisitionProposalsClient({
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setPage(1);
-    loadProposals();
+    if (page === 1) {
+      loadProposals();
+    } else {
+      setPage(1);
+    }
   };
 
   const handleStatusChange = (e: React.ChangeEvent<HTMLSelectElement>) => {

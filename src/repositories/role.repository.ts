@@ -68,27 +68,37 @@ export class RoleRepository {
 
   /**
    * Retrieves all roles with their associated permissions.
+   * Batched into 2 queries to eliminate N+1 query pattern.
    */
   async findAllRolesWithPermissions(): Promise<RoleWithPermissions[]> {
     const allRoles = await db.select().from(roles).orderBy(roles.name);
+    if (allRoles.length === 0) return [];
 
-    const result: RoleWithPermissions[] = [];
-    for (const role of allRoles) {
-      const perms = await db
-        .select({
+    const allRolePerms = await db
+      .select({
+        roleId: rolePermissions.roleId,
+        permission: {
           id: permissions.id,
           name: permissions.name,
           description: permissions.description,
           createdAt: permissions.createdAt,
-        })
-        .from(rolePermissions)
-        .innerJoin(permissions, eq(rolePermissions.permissionId, permissions.id))
-        .where(eq(rolePermissions.roleId, role.id))
-        .orderBy(permissions.name);
+        },
+      })
+      .from(rolePermissions)
+      .innerJoin(permissions, eq(rolePermissions.permissionId, permissions.id))
+      .orderBy(permissions.name);
 
-      result.push({ ...role, permissions: perms });
+    const permsMap = new Map<string, Permission[]>();
+    for (const rp of allRolePerms) {
+      const list = permsMap.get(rp.roleId) ?? [];
+      list.push(rp.permission);
+      permsMap.set(rp.roleId, list);
     }
-    return result;
+
+    return allRoles.map((role) => ({
+      ...role,
+      permissions: permsMap.get(role.id) ?? [],
+    }));
   }
 
   /**

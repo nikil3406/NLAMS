@@ -168,19 +168,25 @@ export class AcquisitionCaseRepository {
       return null;
     }
 
-    // Fetch updater user
-    const [updater] = await db
-      .select({
-        id: users.id,
-        name: users.name,
-        email: users.email,
-      })
-      .from(users)
-      .where(eq(users.id, row.caseData.updatedBy))
-      .limit(1);
+    // Fetch updater user and workflow history concurrently
+    const updaterPromise =
+      row.caseData.updatedBy === row.caseData.createdBy
+        ? Promise.resolve(row.creator)
+        : db
+            .select({
+              id: users.id,
+              name: users.name,
+              email: users.email,
+            })
+            .from(users)
+            .where(eq(users.id, row.caseData.updatedBy))
+            .limit(1)
+            .then(([u]) => u ?? row.creator);
 
-    // Fetch workflow history
-    const history = await this.getWorkflowHistoryByCaseId(id);
+    const [updater, history] = await Promise.all([
+      updaterPromise,
+      this.getWorkflowHistoryByCaseId(id),
+    ]);
 
     return {
       ...row.caseData,

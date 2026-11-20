@@ -870,18 +870,7 @@ export class AcquisitionProposalService {
     query: AcquisitionProposalQueryInput,
     userId: string
   ): Promise<PaginatedProposalsResult> {
-    const isSuper = await permissionService.isSuperAdmin(userId);
-
-    let scopedUnitIds: string[] | undefined;
-    if (!isSuper) {
-      const assignedUnits = await scopeService.getUserAssignedUnits(userId);
-      const allScopedUnits = new Set<string>();
-      for (const unit of assignedUnits) {
-        const subtree = await scopeService.getDescendantUnitIds(unit.id);
-        subtree.forEach((id: string) => allScopedUnits.add(id));
-      }
-      scopedUnitIds = Array.from(allScopedUnits);
-    }
+    const scopedUnitIds = await scopeService.getAllowedUnitIdsForUser(userId);
 
     const page = Math.max(1, query.page ?? 1);
     const limit = Math.min(100, Math.max(1, query.limit ?? 20));
@@ -925,17 +914,7 @@ export class AcquisitionProposalService {
   async listEligibleCasesForProposal(userId: string) {
     await this.assertAuthorizedImplementingAgency(userId);
 
-    const isSuper = await permissionService.isSuperAdmin(userId);
-    let scopedUnitIds: string[] | undefined;
-    if (!isSuper) {
-      const assignedUnits = await scopeService.getUserAssignedUnits(userId);
-      const allScopedUnits = new Set<string>();
-      for (const unit of assignedUnits) {
-        const subtree = await scopeService.getDescendantUnitIds(unit.id);
-        subtree.forEach((id: string) => allScopedUnits.add(id));
-      }
-      scopedUnitIds = Array.from(allScopedUnits);
-    }
+    const scopedUnitIds = await scopeService.getAllowedUnitIdsForUser(userId);
 
     // Query cases from db that don't have a proposal yet
     // and have at least one approved inventory

@@ -89,29 +89,31 @@ export class ProjectRepository {
    * Finds a project by its primary key ID with all relational details.
    */
   async findProjectById(id: string): Promise<ProjectWithRelations | null> {
-    const [row] = await db
-      .select({
-        project: projects,
-        agency: implementingAgencies,
-        adminUnit: administrativeUnits,
-        creator: {
-          id: users.id,
-          name: users.name,
-          email: users.email,
-        },
-      })
-      .from(projects)
-      .innerJoin(implementingAgencies, eq(projects.implementingAgencyId, implementingAgencies.id))
-      .innerJoin(administrativeUnits, eq(projects.administrativeUnitId, administrativeUnits.id))
-      .innerJoin(users, eq(projects.createdBy, users.id))
-      .where(eq(projects.id, id))
-      .limit(1);
+    const [row, boundary] = await Promise.all([
+      db
+        .select({
+          project: projects,
+          agency: implementingAgencies,
+          adminUnit: administrativeUnits,
+          creator: {
+            id: users.id,
+            name: users.name,
+            email: users.email,
+          },
+        })
+        .from(projects)
+        .innerJoin(implementingAgencies, eq(projects.implementingAgencyId, implementingAgencies.id))
+        .innerJoin(administrativeUnits, eq(projects.administrativeUnitId, administrativeUnits.id))
+        .innerJoin(users, eq(projects.createdBy, users.id))
+        .where(eq(projects.id, id))
+        .limit(1)
+        .then(([r]) => r ?? null),
+      projectBoundaryRepository.findLatestBoundaryByProjectId(id),
+    ]);
 
     if (!row) {
       return null;
     }
-
-    const boundary = await projectBoundaryRepository.findLatestBoundaryByProjectId(id);
 
     return {
       ...row.project,

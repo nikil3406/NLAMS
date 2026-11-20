@@ -1,3 +1,4 @@
+import { cache } from 'react';
 import type { NextRequest } from 'next/server';
 import { authConfig } from '../config/auth';
 import { authService, AuthenticationError } from '../services/auth';
@@ -24,14 +25,15 @@ export async function getSessionToken(request?: NextRequest): Promise<string | n
 /**
  * Retrieves the currently authenticated user from the session cookie.
  * Returns null if unauthenticated, expired, or invalid.
+ * Request-scoped memoization ensures single execution per server request.
  */
-export async function getCurrentUser(request?: NextRequest): Promise<SafeUser | null> {
+export const getCurrentUser = cache(async (request?: NextRequest): Promise<SafeUser | null> => {
   const token = await getSessionToken(request);
   if (!token) {
     return null;
   }
   return authService.getAuthenticatedUser(token);
-}
+});
 
 /**
  * Protected route helper: asserts that the current request is authenticated.

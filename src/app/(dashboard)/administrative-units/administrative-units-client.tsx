@@ -16,6 +16,21 @@ interface AdministrativeUnitsClientProps {
   isSuperAdmin: boolean;
 }
 
+function flattenTreeNodes(nodes: AdministrativeUnitTreeNode[]): AdministrativeUnit[] {
+  const result: AdministrativeUnit[] = [];
+  function traverse(list: AdministrativeUnitTreeNode[]) {
+    for (const node of list) {
+      const { children, ...unit } = node;
+      result.push(unit as unknown as AdministrativeUnit);
+      if (children && children.length > 0) {
+        traverse(children);
+      }
+    }
+  }
+  traverse(nodes);
+  return result;
+}
+
 export function AdministrativeUnitsClient({
   userPermissions,
   isSuperAdmin,
@@ -57,15 +72,12 @@ export function AdministrativeUnitsClient({
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
 
-  // Fetch Tree & Flat Units
+  // Fetch Hierarchy Tree (flatUnits derived in memory)
   const loadHierarchyData = useCallback(async () => {
     setIsLoadingTree(true);
     setErrorMessage(null);
     try {
-      const [treeRes, flatRes] = await Promise.all([
-        fetch('/api/administrative-units?tree=true'),
-        fetch('/api/administrative-units'),
-      ]);
+      const treeRes = await fetch('/api/administrative-units?tree=true');
 
       if (!treeRes.ok) {
         if (treeRes.status === 403) {
@@ -75,10 +87,11 @@ export function AdministrativeUnitsClient({
       }
 
       const treeJson = await treeRes.json();
-      const flatJson = await flatRes.json();
 
       if (treeJson.success) {
         setTreeData(treeJson.data);
+        setFlatUnits(flattenTreeNodes(treeJson.data));
+
         // Expand root nodes by default
         const initialExpanded = new Set<string>();
         treeJson.data.forEach((node: AdministrativeUnitTreeNode) => {
@@ -89,20 +102,14 @@ export function AdministrativeUnitsClient({
         setExpandedIds(initialExpanded);
 
         // Select first unit by default if none selected
-        if (!selectedUnitId && treeJson.data.length > 0) {
-          setSelectedUnitId(treeJson.data[0].id);
-        }
-      }
-
-      if (flatJson.success) {
-        setFlatUnits(flatJson.data);
+        setSelectedUnitId((current) => current || (treeJson.data[0]?.id ?? null));
       }
     } catch (err: unknown) {
       setErrorMessage((err as Error).message || 'Unable to connect to hierarchy service.');
     } finally {
       setIsLoadingTree(false);
     }
-  }, [selectedUnitId]);
+  }, []);
 
   useEffect(() => {
     loadHierarchyData();

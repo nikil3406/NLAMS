@@ -1,3 +1,4 @@
+import { cache } from 'react';
 import { randomBytes, createHash } from 'node:crypto';
 import { sessionRepository } from '../../repositories/session.repository';
 import { authConfig } from '../../config/auth';
@@ -48,8 +49,9 @@ export class SessionService {
   /**
    * Validates a raw session token.
    * Verifies expiry and checks that the user account is ACTIVE.
+   * Uses React cache for request-scoped memoization.
    */
-  async validateSession(rawToken: string): Promise<{ session: Session; user: SafeUser } | null> {
+  validateSession = cache(async (rawToken: string): Promise<{ session: Session; user: SafeUser } | null> => {
     if (!rawToken || typeof rawToken !== 'string' || rawToken.trim().length === 0) {
       return null;
     }
@@ -78,7 +80,7 @@ export class SessionService {
       session,
       user: sanitizeUser(user),
     };
-  }
+  });
 
   /**
    * Destroys an existing session by its raw token.

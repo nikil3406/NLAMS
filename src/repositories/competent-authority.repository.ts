@@ -232,6 +232,7 @@ export class CompetentAuthorityRepository {
 
   /**
    * Retrieves jurisdictions for an authority with administrative unit details.
+   * Batched to eliminate N+1 queries for state, district, taluk, and village units.
    */
   async findJurisdictionsByAuthorityId(
     authorityId: string,
@@ -245,55 +246,40 @@ export class CompetentAuthorityRepository {
       .where(eq(authorityJurisdictions.authorityId, authorityId))
       .orderBy(desc(authorityJurisdictions.createdAt));
 
-    const result: AuthorityJurisdictionWithUnits[] = [];
+    if (rows.length === 0) return [];
 
+    const unitIdSet = new Set<string>();
     for (const r of rows) {
-      const [state] = await executor
-        .select({ id: administrativeUnits.id, name: administrativeUnits.name, code: administrativeUnits.code, type: administrativeUnits.type })
-        .from(administrativeUnits)
-        .where(eq(administrativeUnits.id, r.stateId))
-        .limit(1);
-
-      let district = null;
-      if (r.districtId) {
-        const [d] = await executor
-          .select({ id: administrativeUnits.id, name: administrativeUnits.name, code: administrativeUnits.code, type: administrativeUnits.type })
-          .from(administrativeUnits)
-          .where(eq(administrativeUnits.id, r.districtId))
-          .limit(1);
-        district = d ?? null;
-      }
-
-      let taluk = null;
-      if (r.talukId) {
-        const [t] = await executor
-          .select({ id: administrativeUnits.id, name: administrativeUnits.name, code: administrativeUnits.code, type: administrativeUnits.type })
-          .from(administrativeUnits)
-          .where(eq(administrativeUnits.id, r.talukId))
-          .limit(1);
-        taluk = t ?? null;
-      }
-
-      let village = null;
-      if (r.villageId) {
-        const [v] = await executor
-          .select({ id: administrativeUnits.id, name: administrativeUnits.name, code: administrativeUnits.code, type: administrativeUnits.type })
-          .from(administrativeUnits)
-          .where(eq(administrativeUnits.id, r.villageId))
-          .limit(1);
-        village = v ?? null;
-      }
-
-      result.push({
-        ...r,
-        state: state ?? { id: r.stateId, name: 'Unknown', code: 'UNK', type: 'STATE' },
-        district,
-        taluk,
-        village,
-      });
+      if (r.stateId) unitIdSet.add(r.stateId);
+      if (r.districtId) unitIdSet.add(r.districtId);
+      if (r.talukId) unitIdSet.add(r.talukId);
+      if (r.villageId) unitIdSet.add(r.villageId);
     }
 
-    return result;
+    const unitMap = new Map<string, { id: string; name: string; code: string; type: string }>();
+    if (unitIdSet.size > 0) {
+      const units = await executor
+        .select({
+          id: administrativeUnits.id,
+          name: administrativeUnits.name,
+          code: administrativeUnits.code,
+          type: administrativeUnits.type,
+        })
+        .from(administrativeUnits)
+        .where(inArray(administrativeUnits.id, Array.from(unitIdSet)));
+
+      for (const u of units) {
+        unitMap.set(u.id, u);
+      }
+    }
+
+    return rows.map((r) => ({
+      ...r,
+      state: unitMap.get(r.stateId) ?? { id: r.stateId, name: 'Unknown', code: 'UNK', type: 'STATE' },
+      district: r.districtId ? unitMap.get(r.districtId) ?? null : null,
+      taluk: r.talukId ? unitMap.get(r.talukId) ?? null : null,
+      village: r.villageId ? unitMap.get(r.villageId) ?? null : null,
+    }));
   }
 
   /**
@@ -598,24 +584,69 @@ export class CompetentAuthorityRepository {
         )
       );
 
-    const result: AuthorityWithDetails[] = [];
-    for (const auth of authorities) {
-      const jurisdictions = await this.findJurisdictionsByAuthorityId(auth.id, txClient);
-      const activeJurisdictions = jurisdictions.filter(
-        (j) =>
-          j.status === 'ACTIVE' &&
-          j.effectiveFrom <= today &&
-          (!j.effectiveUntil || j.effectiveUntil >= today)
-      );
+    if (authorities.length === 0) return [];
 
-      result.push({
-        ...auth,
-        jurisdictions: activeJurisdictions,
-        userAssignments: [],
-      });
+    const authIds = authorities.map((a) => a.id);
+    const jurisdictionRows = await executor
+      .select()
+      .from(authorityJurisdictions)
+      .where(
+        and(
+          inArray(authorityJurisdictions.authorityId, authIds),
+          eq(authorityJurisdictions.status, 'ACTIVE'),
+          sql`${authorityJurisdictions.effectiveFrom} <= ${today}::date`,
+          or(
+            sql`${authorityJurisdictions.effectiveUntil} IS NULL`,
+            sql`${authorityJurisdictions.effectiveUntil} >= ${today}::date`
+          )
+        )
+      )
+      .orderBy(desc(authorityJurisdictions.createdAt));
+
+    // Batch resolve unit details in a single query
+    const unitIdSet = new Set<string>();
+    for (const r of jurisdictionRows) {
+      if (r.stateId) unitIdSet.add(r.stateId);
+      if (r.districtId) unitIdSet.add(r.districtId);
+      if (r.talukId) unitIdSet.add(r.talukId);
+      if (r.villageId) unitIdSet.add(r.villageId);
     }
 
-    return result;
+    const unitMap = new Map<string, { id: string; name: string; code: string; type: string }>();
+    if (unitIdSet.size > 0) {
+      const units = await executor
+        .select({
+          id: administrativeUnits.id,
+          name: administrativeUnits.name,
+          code: administrativeUnits.code,
+          type: administrativeUnits.type,
+        })
+        .from(administrativeUnits)
+        .where(inArray(administrativeUnits.id, Array.from(unitIdSet)));
+
+      for (const u of units) {
+        unitMap.set(u.id, u);
+      }
+    }
+
+    const jurisdictionMap = new Map<string, AuthorityJurisdictionWithUnits[]>();
+    for (const r of jurisdictionRows) {
+      const list = jurisdictionMap.get(r.authorityId) ?? [];
+      list.push({
+        ...r,
+        state: unitMap.get(r.stateId) ?? { id: r.stateId, name: 'Unknown', code: 'UNK', type: 'STATE' },
+        district: r.districtId ? unitMap.get(r.districtId) ?? null : null,
+        taluk: r.talukId ? unitMap.get(r.talukId) ?? null : null,
+        village: r.villageId ? unitMap.get(r.villageId) ?? null : null,
+      });
+      jurisdictionMap.set(r.authorityId, list);
+    }
+
+    return authorities.map((auth) => ({
+      ...auth,
+      jurisdictions: jurisdictionMap.get(auth.id) ?? [],
+      userAssignments: [],
+    }));
   }
 }
 

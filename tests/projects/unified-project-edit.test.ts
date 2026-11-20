@@ -114,7 +114,7 @@ describe('Unified Project Editing Interface & Boundary Persistence', () => {
           name: `Karnataka Test ${ts}`,
           code: `KA`,
           type: 'STATE',
-          status: 'ACTIVE',
+          isActive: true,
         })
         .returning();
       unitIdKA = newKA.id;
@@ -134,7 +134,11 @@ describe('Unified Project Editing Interface & Boundary Persistence', () => {
         .values({
           name: `NHAI Test ${ts}`,
           code: `NHAI-${ts}`,
+          normalizedName: `nhai test ${ts}`,
+          agencyType: 'STATUTORY_AUTHORITY',
           status: 'ACTIVE',
+          sourceUrl: 'https://nhai.gov.in',
+          sourceVerifiedAt: new Date(),
         })
         .returning();
       nhaiAgencyId = newAgency.id;

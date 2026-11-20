@@ -153,38 +153,26 @@ export class ProjectService {
     // 1. Permission check
     await permissionService.requirePermission(userId, 'PROJECT_VIEW');
 
-    const isSuper = await permissionService.isSuperAdmin(userId);
+    const allowedUnits = await scopeService.getAllowedUnitIdsForUser(userId);
     let allowedUnitIds: string[] | undefined;
 
-    if (!isSuper) {
-      // Resolve all descendant unit IDs for all assigned units
-      const assignedUnits = await scopeService.getUserAssignedUnits(userId);
-      if (assignedUnits.length === 0) {
+    if (allowedUnits !== undefined) {
+      if (allowedUnits.length === 0) {
         return {
           data: [],
           pagination: { total: 0, page: query.page, limit: query.limit, totalPages: 0 },
         };
       }
-
-      const unitIdSet = new Set<string>();
-      for (const unit of assignedUnits) {
-        const descendants = await administrativeUnitRepository.getDescendantUnitIds(unit.id);
-        for (const id of descendants) {
-          unitIdSet.add(id);
-        }
-      }
-
-      allowedUnitIds = Array.from(unitIdSet);
-
-      // If user filtered by a specific administrativeUnitId, verify it is in scope
       if (query.administrativeUnitId) {
-        if (!unitIdSet.has(query.administrativeUnitId)) {
+        if (!allowedUnits.includes(query.administrativeUnitId)) {
           return {
             data: [],
             pagination: { total: 0, page: query.page, limit: query.limit, totalPages: 0 },
           };
         }
         allowedUnitIds = [query.administrativeUnitId];
+      } else {
+        allowedUnitIds = allowedUnits;
       }
     } else if (query.administrativeUnitId) {
       allowedUnitIds = [query.administrativeUnitId];

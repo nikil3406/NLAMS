@@ -140,62 +140,62 @@ export class UserRepository {
       return null;
     }
 
-    const userRolesList = await db
-      .select({
-        id: roles.id,
-        name: roles.name,
-        description: roles.description,
-        isSystemRole: roles.isSystemRole,
-        createdAt: roles.createdAt,
-        updatedAt: roles.updatedAt,
-      })
-      .from(userRoles)
-      .innerJoin(roles, eq(userRoles.roleId, roles.id))
-      .where(eq(userRoles.userId, id))
-      .orderBy(roles.name);
-
-    const assignmentsList = await db
-      .select({
-        id: userAssignments.id,
-        administrativeUnitId: administrativeUnits.id,
-        administrativeUnitName: administrativeUnits.name,
-        administrativeUnitCode: administrativeUnits.code,
-        administrativeUnitType: administrativeUnits.type,
-        status: userAssignments.status,
-        startDate: userAssignments.startDate,
-        endDate: userAssignments.endDate,
-        assignedBy: userAssignments.assignedBy,
-        createdAt: userAssignments.createdAt,
-      })
-      .from(userAssignments)
-      .innerJoin(
-        administrativeUnits,
-        eq(userAssignments.administrativeUnitId, administrativeUnits.id)
-      )
-      .where(eq(userAssignments.userId, id))
-      .orderBy(desc(userAssignments.createdAt));
-
-    const authorityAssignmentsList = await db
-      .select({
-        id: authorityUserAssignments.id,
-        authorityId: competentAuthorities.id,
-        authorityCode: competentAuthorities.authorityCode,
-        authorityName: competentAuthorities.authorityName,
-        designation: competentAuthorities.designation,
-        authorityLevel: competentAuthorities.authorityLevel,
-        status: authorityUserAssignments.status,
-        effectiveFrom: authorityUserAssignments.effectiveFrom,
-        effectiveUntil: authorityUserAssignments.effectiveUntil,
-        assignedBy: authorityUserAssignments.assignedBy,
-        createdAt: authorityUserAssignments.createdAt,
-      })
-      .from(authorityUserAssignments)
-      .innerJoin(
-        competentAuthorities,
-        eq(authorityUserAssignments.authorityId, competentAuthorities.id)
-      )
-      .where(eq(authorityUserAssignments.userId, id))
-      .orderBy(desc(authorityUserAssignments.createdAt));
+    const [userRolesList, assignmentsList, authorityAssignmentsList] = await Promise.all([
+      db
+        .select({
+          id: roles.id,
+          name: roles.name,
+          description: roles.description,
+          isSystemRole: roles.isSystemRole,
+          createdAt: roles.createdAt,
+          updatedAt: roles.updatedAt,
+        })
+        .from(userRoles)
+        .innerJoin(roles, eq(userRoles.roleId, roles.id))
+        .where(eq(userRoles.userId, id))
+        .orderBy(roles.name),
+      db
+        .select({
+          id: userAssignments.id,
+          administrativeUnitId: administrativeUnits.id,
+          administrativeUnitName: administrativeUnits.name,
+          administrativeUnitCode: administrativeUnits.code,
+          administrativeUnitType: administrativeUnits.type,
+          status: userAssignments.status,
+          startDate: userAssignments.startDate,
+          endDate: userAssignments.endDate,
+          assignedBy: userAssignments.assignedBy,
+          createdAt: userAssignments.createdAt,
+        })
+        .from(userAssignments)
+        .innerJoin(
+          administrativeUnits,
+          eq(userAssignments.administrativeUnitId, administrativeUnits.id)
+        )
+        .where(eq(userAssignments.userId, id))
+        .orderBy(desc(userAssignments.createdAt)),
+      db
+        .select({
+          id: authorityUserAssignments.id,
+          authorityId: competentAuthorities.id,
+          authorityCode: competentAuthorities.authorityCode,
+          authorityName: competentAuthorities.authorityName,
+          designation: competentAuthorities.designation,
+          authorityLevel: competentAuthorities.authorityLevel,
+          status: authorityUserAssignments.status,
+          effectiveFrom: authorityUserAssignments.effectiveFrom,
+          effectiveUntil: authorityUserAssignments.effectiveUntil,
+          assignedBy: authorityUserAssignments.assignedBy,
+          createdAt: authorityUserAssignments.createdAt,
+        })
+        .from(authorityUserAssignments)
+        .innerJoin(
+          competentAuthorities,
+          eq(authorityUserAssignments.authorityId, competentAuthorities.id)
+        )
+        .where(eq(authorityUserAssignments.userId, id))
+        .orderBy(desc(authorityUserAssignments.createdAt)),
+    ]);
 
     return {
       id: user.id,
@@ -325,43 +325,66 @@ export class UserRepository {
 
     const userIds = userRows.map((u) => u.id);
 
-    // Batch fetch roles for all selected users
-    const allRoles = await db
-      .select({
-        userId: userRoles.userId,
-        role: roles,
-      })
-      .from(userRoles)
-      .innerJoin(roles, eq(userRoles.roleId, roles.id))
-      .where(inArray(userRoles.userId, userIds))
-      .orderBy(roles.name);
+    // Fetch roles, assignments, and authority assignments concurrently
+    const [allRoles, allAssignments, allAuthAssignments] = await Promise.all([
+      db
+        .select({
+          userId: userRoles.userId,
+          role: roles,
+        })
+        .from(userRoles)
+        .innerJoin(roles, eq(userRoles.roleId, roles.id))
+        .where(inArray(userRoles.userId, userIds))
+        .orderBy(roles.name),
+      db
+        .select({
+          userId: userAssignments.userId,
+          assignment: {
+            id: userAssignments.id,
+            administrativeUnitId: administrativeUnits.id,
+            administrativeUnitName: administrativeUnits.name,
+            administrativeUnitCode: administrativeUnits.code,
+            administrativeUnitType: administrativeUnits.type,
+            status: userAssignments.status,
+            startDate: userAssignments.startDate,
+            endDate: userAssignments.endDate,
+            assignedBy: userAssignments.assignedBy,
+            createdAt: userAssignments.createdAt,
+          },
+        })
+        .from(userAssignments)
+        .innerJoin(
+          administrativeUnits,
+          eq(userAssignments.administrativeUnitId, administrativeUnits.id)
+        )
+        .where(inArray(userAssignments.userId, userIds))
+        .orderBy(desc(userAssignments.createdAt)),
+      db
+        .select({
+          userId: authorityUserAssignments.userId,
+          assignment: {
+            id: authorityUserAssignments.id,
+            authorityId: competentAuthorities.id,
+            authorityCode: competentAuthorities.authorityCode,
+            authorityName: competentAuthorities.authorityName,
+            designation: competentAuthorities.designation,
+            authorityLevel: competentAuthorities.authorityLevel,
+            status: authorityUserAssignments.status,
+            effectiveFrom: authorityUserAssignments.effectiveFrom,
+            effectiveUntil: authorityUserAssignments.effectiveUntil,
+            assignedBy: authorityUserAssignments.assignedBy,
+            createdAt: authorityUserAssignments.createdAt,
+          },
+        })
+        .from(authorityUserAssignments)
+        .innerJoin(
+          competentAuthorities,
+          eq(authorityUserAssignments.authorityId, competentAuthorities.id)
+        )
+        .where(inArray(authorityUserAssignments.userId, userIds))
+        .orderBy(desc(authorityUserAssignments.createdAt)),
+    ]);
 
-    // Batch fetch assignments for all selected users
-    const allAssignments = await db
-      .select({
-        userId: userAssignments.userId,
-        assignment: {
-          id: userAssignments.id,
-          administrativeUnitId: administrativeUnits.id,
-          administrativeUnitName: administrativeUnits.name,
-          administrativeUnitCode: administrativeUnits.code,
-          administrativeUnitType: administrativeUnits.type,
-          status: userAssignments.status,
-          startDate: userAssignments.startDate,
-          endDate: userAssignments.endDate,
-          assignedBy: userAssignments.assignedBy,
-          createdAt: userAssignments.createdAt,
-        },
-      })
-      .from(userAssignments)
-      .innerJoin(
-        administrativeUnits,
-        eq(userAssignments.administrativeUnitId, administrativeUnits.id)
-      )
-      .where(inArray(userAssignments.userId, userIds))
-      .orderBy(desc(userAssignments.createdAt));
-
-    // Group roles and assignments by userId
     const rolesMap = new Map<string, Role[]>();
     for (const r of allRoles) {
       const list = rolesMap.get(r.userId) ?? [];
@@ -375,32 +398,6 @@ export class UserRepository {
       list.push(a.assignment);
       assignmentsMap.set(a.userId, list);
     }
-
-    // Batch fetch authority assignments for all selected users
-    const allAuthAssignments = await db
-      .select({
-        userId: authorityUserAssignments.userId,
-        assignment: {
-          id: authorityUserAssignments.id,
-          authorityId: competentAuthorities.id,
-          authorityCode: competentAuthorities.authorityCode,
-          authorityName: competentAuthorities.authorityName,
-          designation: competentAuthorities.designation,
-          authorityLevel: competentAuthorities.authorityLevel,
-          status: authorityUserAssignments.status,
-          effectiveFrom: authorityUserAssignments.effectiveFrom,
-          effectiveUntil: authorityUserAssignments.effectiveUntil,
-          assignedBy: authorityUserAssignments.assignedBy,
-          createdAt: authorityUserAssignments.createdAt,
-        },
-      })
-      .from(authorityUserAssignments)
-      .innerJoin(
-        competentAuthorities,
-        eq(authorityUserAssignments.authorityId, competentAuthorities.id)
-      )
-      .where(inArray(authorityUserAssignments.userId, userIds))
-      .orderBy(desc(authorityUserAssignments.createdAt));
 
     const authAssignmentsMap = new Map<string, UserAuthorityAssignmentDetail[]>();
     for (const a of allAuthAssignments) {

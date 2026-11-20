@@ -1,3 +1,4 @@
+import { cache } from 'react';
 import { userAssignmentRepository } from '../../repositories/user-assignment.repository';
 import { administrativeUnitRepository } from '../../repositories/administrative-unit.repository';
 import { permissionService } from './permission.service';
@@ -11,12 +12,43 @@ import type { AdministrativeUnit } from '../../../db/schema/administrative-units
 export class ScopeService {
   /**
    * Retrieves all active administrative units directly assigned to a user.
+   * Memoized per request.
    */
-  async getUserAssignedUnits(userId: string): Promise<AdministrativeUnit[]> {
+  getUserAssignedUnits = cache(async (userId: string): Promise<AdministrativeUnit[]> => {
     const assignments =
       await userAssignmentRepository.findActiveAssignmentsWithUnitsByUserId(userId);
     return assignments.map((a) => a.administrativeUnit);
-  }
+  });
+
+  /**
+   * Resolves all administrative unit IDs in the user's scope (including descendants).
+   * Returns undefined for SUPER_ADMIN (national/unrestricted).
+   * Returns empty array if user has no assigned units.
+   * Memoized per request.
+   */
+  getAllowedUnitIdsForUser = cache(async (userId: string): Promise<string[] | undefined> => {
+    if (await permissionService.isSuperAdmin(userId)) {
+      return undefined;
+    }
+
+    const assignedUnits = await this.getUserAssignedUnits(userId);
+    if (assignedUnits.length === 0) {
+      return [];
+    }
+
+    const descendantLists = await Promise.all(
+      assignedUnits.map((u) => administrativeUnitRepository.getDescendantUnitIds(u.id))
+    );
+
+    const unitIdSet = new Set<string>();
+    for (const list of descendantLists) {
+      for (const id of list) {
+        unitIdSet.add(id);
+      }
+    }
+
+    return Array.from(unitIdSet);
+  });
 
   /**
    * Checks whether targetAdministrativeUnitId falls within the actor's administrative scope.
@@ -42,6 +74,11 @@ export class ScopeService {
     const assignedUnits = await this.getUserAssignedUnits(actorUserId);
     if (assignedUnits.length === 0) {
       return false;
+    }
+
+    // Fast-path: Check direct unit match in-memory without DB query
+    if (assignedUnits.some((u) => u.id === targetAdministrativeUnitId)) {
+      return true;
     }
 
     // Check each assigned unit against the target unit

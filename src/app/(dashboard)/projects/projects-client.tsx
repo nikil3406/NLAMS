@@ -93,8 +93,11 @@ export function ProjectsClient({
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setPage(1);
-    loadProjects();
+    if (page === 1) {
+      loadProjects();
+    } else {
+      setPage(1);
+    }
   };
 
   const handleResetFilters = () => {

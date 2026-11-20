@@ -910,20 +910,9 @@ export class VerifiedLandInventoryService {
       );
     }
 
-    let scopedUnitIds: string[] | undefined;
-    if (!isSuper) {
-      const assignedUnits = await scopeService.getUserAssignedUnits(userId);
-      if (assignedUnits.length === 0) {
-        return [];
-      }
-      const unitIdSet = new Set<string>();
-      for (const u of assignedUnits) {
-        const descendants = await scopeService.getDescendantUnitIds(u.id);
-        for (const d of descendants) {
-          unitIdSet.add(d);
-        }
-      }
-      scopedUnitIds = Array.from(unitIdSet);
+    const scopedUnitIds = await scopeService.getAllowedUnitIdsForUser(userId);
+    if (scopedUnitIds !== undefined && scopedUnitIds.length === 0) {
+      return [];
     }
 
     return verifiedLandInventoryRepository.listSubmittedInventories(scopedUnitIds);
@@ -951,37 +940,24 @@ export class VerifiedLandInventoryService {
       );
     }
 
-    const isSuper = await permissionService.isSuperAdmin(userId);
-    let scopedUnitIds: string[] | undefined;
-
-    if (!isSuper) {
-      const assignedUnits = await scopeService.getUserAssignedUnits(userId);
-      if (assignedUnits.length === 0) {
-        return {
-          items: [],
-          pagination: {
-            page: options.page || 1,
-            limit: options.limit || 10,
-            total: 0,
-            totalPages: 1,
-          },
-          summary: {
-            total: 0,
-            draft: 0,
-            pendingReview: 0,
-            approved: 0,
-            correctionRequested: 0,
-          },
-        };
-      }
-      const unitIdSet = new Set<string>();
-      for (const u of assignedUnits) {
-        const descendants = await scopeService.getDescendantUnitIds(u.id);
-        for (const d of descendants) {
-          unitIdSet.add(d);
-        }
-      }
-      scopedUnitIds = Array.from(unitIdSet);
+    const scopedUnitIds = await scopeService.getAllowedUnitIdsForUser(userId);
+    if (scopedUnitIds !== undefined && scopedUnitIds.length === 0) {
+      return {
+        items: [],
+        pagination: {
+          page: options.page || 1,
+          limit: options.limit || 10,
+          total: 0,
+          totalPages: 1,
+        },
+        summary: {
+          total: 0,
+          draft: 0,
+          pendingReview: 0,
+          approved: 0,
+          correctionRequested: 0,
+        },
+      };
     }
 
     const page = Math.max(1, options.page || 1);

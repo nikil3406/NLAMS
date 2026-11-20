@@ -214,8 +214,11 @@ export function VerifiedLandInventoriesClient({
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setPage(1);
-    loadInventories();
+    if (page === 1) {
+      loadInventories();
+    } else {
+      setPage(1);
+    }
   };
 
   const handleResetFilters = () => {

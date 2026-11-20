@@ -646,32 +646,17 @@ export class FieldVerificationReportService {
     await this.assertVerifiedLandOfficer(userId);
     await permissionService.requirePermission(userId, 'ACQUISITION_CASE_VIEW');
 
-    const isSuper = await permissionService.isSuperAdmin(userId);
-
-    let allowedUnitIds: string[] | undefined;
-
-    if (!isSuper) {
-      const assignedUnits = await scopeService.getUserAssignedUnits(userId);
-      if (assignedUnits.length === 0) {
-        return {
-          data: [],
-          pagination: {
-            total: 0,
-            page: query.page,
-            limit: query.limit,
-            totalPages: 1,
-          },
-        };
-      }
-
-      const unitIdSet = new Set<string>();
-      for (const unit of assignedUnits) {
-        const descendants = await scopeService.getDescendantUnitIds(unit.id);
-        for (const id of descendants) {
-          unitIdSet.add(id);
-        }
-      }
-      allowedUnitIds = Array.from(unitIdSet);
+    const allowedUnitIds = await scopeService.getAllowedUnitIdsForUser(userId);
+    if (allowedUnitIds !== undefined && allowedUnitIds.length === 0) {
+      return {
+        data: [],
+        pagination: {
+          total: 0,
+          page: query.page,
+          limit: query.limit,
+          totalPages: 1,
+        },
+      };
     }
 
     const { data, total } = await fieldVerificationReportRepository.listReviewQueue({

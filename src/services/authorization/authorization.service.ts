@@ -1,3 +1,4 @@
+import { cache } from 'react';
 import { userRepository } from '../../repositories/user.repository';
 import { userAssignmentRepository } from '../../repositories/user-assignment.repository';
 import { permissionService } from './permission.service';
@@ -33,17 +34,19 @@ export interface CanManageUserOptions {
 export class AuthorizationService {
   /**
    * Resolves the complete authorization context for an authenticated user.
+   * Uses React cache for request-scoped memoization across layouts and pages.
    */
-  async getUserAuthorizationContext(userId: string): Promise<UserAuthorizationContext | null> {
+  getUserAuthorizationContext = cache(async (userId: string): Promise<UserAuthorizationContext | null> => {
     const user = await userRepository.findUserById(userId);
     if (!user) {
       return null;
     }
 
-    const roles = await permissionService.getUserRoles(userId);
-    const permissions = await permissionService.getUserPermissions(userId);
-    const assignmentsWithUnits =
-      await userAssignmentRepository.findActiveAssignmentsWithUnitsByUserId(userId);
+    const [roles, permissions, assignmentsWithUnits] = await Promise.all([
+      permissionService.getUserRoles(userId),
+      permissionService.getUserPermissions(userId),
+      userAssignmentRepository.findActiveAssignmentsWithUnitsByUserId(userId),
+    ]);
 
     const assignments = assignmentsWithUnits.map(({ assignment, administrativeUnit }) => ({
       id: assignment.id,
@@ -65,7 +68,7 @@ export class AuthorizationService {
       assignments,
       isSuperAdmin,
     };
-  }
+  });
 
   /**
    * Evaluates whether an acting user has authority to manage a target user.

@@ -39,14 +39,8 @@ export class AdministrativeUnitTreeService {
       }
 
       rootIds = new Set(assignedUnits.map((u) => u.id));
-      const authorizedUnitIds = new Set<string>();
-
-      for (const unit of assignedUnits) {
-        const descendantIds = await administrativeUnitRepository.getDescendantUnitIds(unit.id);
-        for (const id of descendantIds) {
-          authorizedUnitIds.add(id);
-        }
-      }
+      const allowedIds = await scopeService.getAllowedUnitIdsForUser(actorUserId);
+      const authorizedUnitIds = new Set<string>(allowedIds ?? []);
 
       const allUnits = await administrativeUnitRepository.getAllAdministrativeUnits();
       units = allUnits.filter((u) => authorizedUnitIds.has(u.id));

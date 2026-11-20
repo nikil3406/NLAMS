@@ -103,8 +103,11 @@ export function UsersClient({
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setPage(1);
-    loadUsers();
+    if (page === 1) {
+      loadUsers();
+    } else {
+      setPage(1);
+    }
   };
 
   const handleResetFilters = () => {

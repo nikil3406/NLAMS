@@ -180,6 +180,25 @@ export class AdministrativeUnitRepository {
   }
 
   /**
+   * Retrieves summary count metrics for administrative hierarchy directly via SQL aggregation.
+   */
+  async getHierarchyMetrics(): Promise<{ totalUnits: number; activeUnits: number; rootUnits: number }> {
+    const [row] = await db
+      .select({
+        totalUnits: sql<number>`count(*)::int`,
+        activeUnits: sql<number>`count(*) filter (where ${administrativeUnits.isActive} = true)::int`,
+        rootUnits: sql<number>`count(*) filter (where ${administrativeUnits.parentId} is null)::int`,
+      })
+      .from(administrativeUnits);
+
+    return {
+      totalUnits: Number(row?.totalUnits ?? 0),
+      activeUnits: Number(row?.activeUnits ?? 0),
+      rootUnits: Number(row?.rootUnits ?? 0),
+    };
+  }
+
+  /**
    * Counts the number of immediate direct children of a unit.
    */
   async countDirectChildren(unitId: string): Promise<number> {

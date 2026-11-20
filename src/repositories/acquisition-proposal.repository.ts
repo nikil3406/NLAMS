@@ -26,7 +26,6 @@ import { users } from '../../db/schema/users';
 import {
   competentAuthorities,
   proposalAuthorityAssignments,
-  type CompetentAuthority,
 } from '../../db/schema/competent-authorities';
 
 type TransactionClient = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -820,43 +819,33 @@ export class AcquisitionProposalRepository {
       .where(eq(acquisitionProposalVersions.proposalId, proposalId))
       .orderBy(desc(acquisitionProposalVersions.versionNumber));
 
-    const result = [];
+    if (versions.length === 0) return [];
+
+    // Collect all unique user IDs across versions to eliminate N+1 queries
+    const userIdSet = new Set<string>();
     for (const v of versions) {
-      const [creator] = await executor
-        .select({ id: users.id, name: users.name, email: users.email })
-        .from(users)
-        .where(eq(users.id, v.createdBy))
-        .limit(1);
-
-      let submitter = null;
-      if (v.submittedBy) {
-        const [sub] = await executor
-          .select({ id: users.id, name: users.name, email: users.email })
-          .from(users)
-          .where(eq(users.id, v.submittedBy))
-          .limit(1);
-        submitter = sub ?? null;
-      }
-
-      let reviewer = null;
-      if (v.reviewedBy) {
-        const [rev] = await executor
-          .select({ id: users.id, name: users.name, email: users.email })
-          .from(users)
-          .where(eq(users.id, v.reviewedBy))
-          .limit(1);
-        reviewer = rev ?? null;
-      }
-
-      result.push({
-        ...v,
-        creator: creator ?? { id: v.createdBy, name: 'Unknown', email: '' },
-        submitter,
-        reviewer,
-      });
+      if (v.createdBy) userIdSet.add(v.createdBy);
+      if (v.submittedBy) userIdSet.add(v.submittedBy);
+      if (v.reviewedBy) userIdSet.add(v.reviewedBy);
     }
 
-    return result;
+    const userMap = new Map<string, { id: string; name: string; email: string }>();
+    if (userIdSet.size > 0) {
+      const userRows = await executor
+        .select({ id: users.id, name: users.name, email: users.email })
+        .from(users)
+        .where(inArray(users.id, Array.from(userIdSet)));
+      for (const u of userRows) {
+        userMap.set(u.id, u);
+      }
+    }
+
+    return versions.map((v) => ({
+      ...v,
+      creator: userMap.get(v.createdBy) ?? { id: v.createdBy, name: 'Unknown', email: '' },
+      submitter: v.submittedBy ? userMap.get(v.submittedBy) ?? null : null,
+      reviewer: v.reviewedBy ? userMap.get(v.reviewedBy) ?? null : null,
+    }));
   }
 
   /**

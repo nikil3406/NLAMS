@@ -16,11 +16,9 @@ export default async function DashboardPage() {
   const permissions = authContext?.permissions ?? [];
   const assignments = authContext?.assignments ?? [];
 
-  // Fetch real statistics from database
-  const allUnits = await administrativeUnitRepository.getAllAdministrativeUnits();
-  const totalUnits = allUnits.length;
-  const activeUnits = allUnits.filter((u) => u.isActive).length;
-  const rootUnits = allUnits.filter((u) => u.parentId === null).length;
+  // Fetch real statistics directly from database via SQL aggregation
+  const { totalUnits, activeUnits, rootUnits } =
+    await administrativeUnitRepository.getHierarchyMetrics();
 
   const modules = [
     {
