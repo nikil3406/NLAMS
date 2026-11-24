@@ -63,10 +63,34 @@ export class AcquisitionCaseService {
       throw new BadRequestError(`Project with ID '${input.projectId}' not found`);
     }
 
-    // 2b. Project status check: Acquisition cases can only be created for projects in REGISTERED status
-    if (project.status !== 'REGISTERED') {
+    // 2b. Project eligibility check: Acquisition cases can only be created for accepted projects
+    if (project.correctionPendingFor) {
       throw new BadRequestError(
-        `Cannot create acquisition case: linked project status is '${project.status}'. Acquisition cases can only be created for projects with 'REGISTERED' status.`
+        `Cannot create acquisition case: linked project has pending corrections requested. Corrections must be addressed and accepted before creating an acquisition case.`
+      );
+    }
+
+    if (project.status === 'DRAFT') {
+      throw new BadRequestError(
+        `Cannot create acquisition case: linked project is still in 'DRAFT' status. Only accepted projects are eligible for acquisition case creation.`
+      );
+    }
+
+    if (project.status === 'SUBMITTED') {
+      throw new BadRequestError(
+        `Cannot create acquisition case: linked project is currently pending review. Only accepted projects are eligible for acquisition case creation.`
+      );
+    }
+
+    if (project.status === 'REJECTED') {
+      throw new BadRequestError(
+        `Cannot create acquisition case: linked project has been rejected.`
+      );
+    }
+
+    if (project.status !== 'ACCEPTED' && project.status !== 'REGISTERED') {
+      throw new BadRequestError(
+        `Cannot create acquisition case: linked project status is '${project.status}'. Acquisition cases can only be created for accepted projects.`
       );
     }
 
@@ -84,7 +108,7 @@ export class AcquisitionCaseService {
     // 4. Generate concurrency-safe unique case reference
     const caseReference = await acquisitionCaseRepository.generateCaseReference();
 
-    // 5. Persist case and initial workflow history record transactionally
+    // 5. Persist case directly in AWAITING_FIELD_VERIFICATION status (no opponent-role approval required)
     const created = await db.transaction(async (tx) => {
       const newCase = await acquisitionCaseRepository.createCase(
         {
@@ -92,7 +116,7 @@ export class AcquisitionCaseService {
           projectId: input.projectId,
           title: input.title,
           description: input.description ?? null,
-          status: 'DRAFT',
+          status: 'AWAITING_FIELD_VERIFICATION',
           createdBy: userId,
           updatedBy: userId,
         },
@@ -104,10 +128,10 @@ export class AcquisitionCaseService {
           caseId: newCase.id,
           caseReference,
           fromStatus: null,
-          toStatus: 'DRAFT',
+          toStatus: 'AWAITING_FIELD_VERIFICATION',
           action: 'CREATE',
           actorId: userId,
-          remarks: 'Case draft created',
+          remarks: 'Case created and ready for field verification',
         },
         tx
       );

@@ -10,6 +10,8 @@ import {
 import { implementingAgencies, type ImplementingAgency } from '../../db/schema/implementing-agencies';
 import { administrativeUnits, type AdministrativeUnit } from '../../db/schema/administrative-units';
 import { users } from '../../db/schema/users';
+import { userRoles } from '../../db/schema/user-roles';
+import { roles } from '../../db/schema/roles';
 import {
   projectBoundaryRepository,
   type BoundaryRecord,
@@ -36,6 +38,7 @@ export interface ProjectWithRelations extends Project {
     name: string;
     email: string;
   };
+  creatorRoles?: string[];
   boundary?: BoundaryRecord | null;
 }
 
@@ -115,11 +118,19 @@ export class ProjectRepository {
       return null;
     }
 
+    const creatorRoleRows = await db
+      .select({ roleName: roles.name })
+      .from(userRoles)
+      .innerJoin(roles, eq(userRoles.roleId, roles.id))
+      .where(eq(userRoles.userId, row.creator.id));
+    const creatorRoles = creatorRoleRows.map((r) => r.roleName);
+
     return {
       ...row.project,
       implementingAgency: row.agency,
       administrativeUnit: row.adminUnit,
       creator: row.creator,
+      creatorRoles,
       boundary,
     };
   }

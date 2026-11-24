@@ -28,8 +28,9 @@ import { administrativeUnits } from '../../db/schema/administrative-units';
 import { implementingAgencies } from '../../db/schema/implementing-agencies';
 import { projects } from '../../db/schema/projects';
 import { acquisitionCases, acquisitionCaseWorkflowHistory } from '../../db/schema/acquisition-cases';
+import { landParcels } from '../../db/schema/land-parcels';
+import { acquisitionCaseParcels } from '../../db/schema/acquisition-case-parcels';
 import { roles } from '../../db/schema/roles';
-import { rolePermissions } from '../../db/schema/role-permissions';
 import { eq, inArray } from 'drizzle-orm';
 import { sessionService } from '../../src/services/auth/session.service';
 import { passwordService } from '../../src/services/auth/password.service';
@@ -37,26 +38,28 @@ import { authConfig } from '../../src/config/auth';
 
 // Route Handlers
 import { POST as projectsPostHandler } from '../../src/app/api/projects/route';
-import { GET as projectDetailGetHandler, PATCH as projectDetailPatchHandler } from '../../src/app/api/projects/[id]/route';
+import { PATCH as projectDetailPatchHandler } from '../../src/app/api/projects/[id]/route';
 import { POST as projectRegisterHandler } from '../../src/app/api/projects/[id]/register/route';
 import { POST as projectResubmitHandler } from '../../src/app/api/projects/[id]/resubmit/route';
-import { POST as casesPostHandler } from '../../src/app/api/acquisition-cases/route';
-import { POST as caseSubmitHandler } from '../../src/app/api/acquisition-cases/[id]/submit/route';
-import { POST as caseReviewHandler } from '../../src/app/api/acquisition-cases/[id]/review/route';
+import { POST as projectReviewHandler } from '../../src/app/api/projects/[id]/review/route';
+import { POST as casesPostHandler, GET as casesListHandler } from '../../src/app/api/acquisition-cases/route';
+import { GET as caseDetailGetHandler } from '../../src/app/api/acquisition-cases/[id]/route';
+import { POST as parcelsPostHandler } from '../../src/app/api/acquisition-cases/[id]/parcels/route';
 
-describe('NLAMS — Ownership, LAND_OFFICER restriction, Counterpart Review & Correction Workflow', () => {
+describe('NLAMS-02 — Relocate Project Approval and Remove Acquisition Case Approval', () => {
   const ts = Date.now();
   const createdUserIds: string[] = [];
   const createdProjectIds: string[] = [];
   const createdCaseIds: string[] = [];
+  const createdParcelIds: string[] = [];
 
   let superAdminId: string;
 
-  // PROJECT_OFFICER who will create projects
+  // PROJECT_OFFICER who creates projects
   let projOfficerId: string;
   let projOfficerCookie: string;
 
-  // MINISTRY_ADMIN who is the counterpart reviewer for PROJECT_OFFICER-created projects
+  // MINISTRY_ADMIN counterpart reviewer for PROJECT_OFFICER-created projects
   let ministryAdminId: string;
   let ministryAdminCookie: string;
 
@@ -68,21 +71,20 @@ describe('NLAMS — Ownership, LAND_OFFICER restriction, Counterpart Review & Co
   let landOfficerId: string;
   let landOfficerCookie: string;
 
-  // Another LAND_OFFICER (should not be able to review)
-  let landOfficer2Id: string;
-  let landOfficer2Cookie: string;
-
-  // FIELD_OFFICER (should not be able to create cases or projects)
+  // FIELD_OFFICER who creates parcel records under active cases
   let fieldOfficerId: string;
   let fieldOfficerCookie: string;
 
   let unitIdKA: string;
   let nhaiAgencyId: string;
 
-  // Projects created by PROJECT_OFFICER (counterpart = MINISTRY_ADMIN)
+  // Projects created
   let projOfficerProjectId: string;
-  // Project created by MINISTRY_ADMIN creator (counterpart = PROJECT_OFFICER)
   let ministryCreatedProjectId: string;
+  let draftProjectId: string;
+
+  // Newly created case ID
+  let activeCaseId: string;
 
   before(async () => {
     // 1. Resolve Super Admin
@@ -148,38 +150,32 @@ describe('NLAMS — Ownership, LAND_OFFICER restriction, Counterpart Review & Co
       return `${authConfig.cookieName}=${token}`;
     };
 
-    // 5. Create PROJECT_OFFICER (can create/edit projects)
-    projOfficerId = await makeUser('KA Project Officer Own', 'proj.officer.own');
+    // 5. Create PROJECT_OFFICER
+    projOfficerId = await makeUser('KA Project Officer', 'proj.officer.nlams02');
     await assignRole(projOfficerId, projOffRole.id);
     await assignUnit(projOfficerId, unitIdKA);
     projOfficerCookie = await makeSession(projOfficerId);
 
-    // 6. Create MINISTRY_ADMIN (counterpart reviewer for PROJECT_OFFICER-created projects)
-    ministryAdminId = await makeUser('Ministry Admin Reviewer', 'ministry.admin.rev');
+    // 6. Create MINISTRY_ADMIN (counterpart reviewer for PROJECT_OFFICER projects)
+    ministryAdminId = await makeUser('Ministry Admin Reviewer', 'ministry.admin.rev02');
     await assignRole(ministryAdminId, ministryRole.id);
     await assignUnit(ministryAdminId, unitIdKA);
     ministryAdminCookie = await makeSession(ministryAdminId);
 
-    // 7. Create MINISTRY_ADMIN who also creates projects (counterpart = PROJECT_OFFICER)
-    ministryAdminCreatorId = await makeUser('Ministry Admin Creator', 'ministry.admin.creator');
+    // 7. Create MINISTRY_ADMIN creator
+    ministryAdminCreatorId = await makeUser('Ministry Admin Creator', 'ministry.admin.cr02');
     await assignRole(ministryAdminCreatorId, ministryRole.id);
     await assignUnit(ministryAdminCreatorId, unitIdKA);
     ministryAdminCreatorCookie = await makeSession(ministryAdminCreatorId);
 
-    // 8. Create LAND_OFFICER (creates and submits cases)
-    landOfficerId = await makeUser('KA Land Officer', 'land.officer.own');
+    // 8. Create LAND_OFFICER (creates cases)
+    landOfficerId = await makeUser('KA Land Officer', 'land.officer.nlams02');
     await assignRole(landOfficerId, landOffRole.id);
     await assignUnit(landOfficerId, unitIdKA);
     landOfficerCookie = await makeSession(landOfficerId);
 
-    // 9. Create second LAND_OFFICER
-    landOfficer2Id = await makeUser('KA Land Officer 2', 'land.officer.2');
-    await assignRole(landOfficer2Id, landOffRole.id);
-    await assignUnit(landOfficer2Id, unitIdKA);
-    landOfficer2Cookie = await makeSession(landOfficer2Id);
-
-    // 10. Create FIELD_OFFICER (cannot create projects or cases)
-    fieldOfficerId = await makeUser('KA Field Officer', 'field.officer.own');
+    // 9. Create FIELD_OFFICER (creates parcels)
+    fieldOfficerId = await makeUser('KA Field Officer', 'field.officer.nlams02');
     await assignRole(fieldOfficerId, fieldOffRole.id);
     await assignUnit(fieldOfficerId, unitIdKA);
     fieldOfficerCookie = await makeSession(fieldOfficerId);
@@ -188,8 +184,12 @@ describe('NLAMS — Ownership, LAND_OFFICER restriction, Counterpart Review & Co
   after(async () => {
     try {
       if (createdCaseIds.length > 0) {
+        await db.delete(acquisitionCaseParcels).where(inArray(acquisitionCaseParcels.caseId, createdCaseIds));
         await db.delete(acquisitionCaseWorkflowHistory).where(inArray(acquisitionCaseWorkflowHistory.caseId, createdCaseIds));
         await db.delete(acquisitionCases).where(inArray(acquisitionCases.id, createdCaseIds));
+      }
+      if (createdParcelIds.length > 0) {
+        await db.delete(landParcels).where(inArray(landParcels.id, createdParcelIds));
       }
       if (createdProjectIds.length > 0) {
         await db.delete(projects).where(inArray(projects.id, createdProjectIds));
@@ -205,524 +205,333 @@ describe('NLAMS — Ownership, LAND_OFFICER restriction, Counterpart Review & Co
   });
 
   // ──────────────────────────────────────────────────────────────────────────────
-  // PROJECT CREATION ROLE RESTRICTION
+  // SCENARIO 1 & 2: Project Creation & Registration entering Counterpart Review
   // ──────────────────────────────────────────────────────────────────────────────
 
-  it('1. PROJECT_OFFICER can create a project (returns 201)', async () => {
-    const req = new NextRequest('http://localhost:3000/api/projects', {
+  it('1. PROJECT_OFFICER creates a project -> registers it -> enters SUBMITTED status for MINISTRY_ADMIN review', async () => {
+    // Step 1: Create project in DRAFT
+    const createReq = new NextRequest('http://localhost:3000/api/projects', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', cookie: projOfficerCookie },
       body: JSON.stringify({
-        name: `PO-Created Project ${ts}`,
+        name: `PO Highway Project ${ts}`,
         projectType: 'Highway',
         implementingAgencyId: nhaiAgencyId,
         administrativeUnitId: unitIdKA,
         landAcquisitionRequired: true,
       }),
     });
-    const res = await projectsPostHandler(req);
-    assert.equal(res.status, 201, 'PROJECT_OFFICER must be able to create a project');
-    const json = await res.json();
+    const createRes = await projectsPostHandler(createReq);
+    assert.equal(createRes.status, 201);
+    const json = await createRes.json();
     projOfficerProjectId = json.data.id;
     createdProjectIds.push(projOfficerProjectId);
-    assert.equal(json.data.createdBy, projOfficerId);
+    assert.equal(json.data.status, 'DRAFT');
+
+    // Step 2: Register project -> enters review queue in SUBMITTED status
+    const regReq = new NextRequest(`http://localhost:3000/api/projects/${projOfficerProjectId}/register`, {
+      method: 'POST',
+      headers: { cookie: projOfficerCookie },
+    });
+    const regRes = await projectRegisterHandler(regReq, { params: Promise.resolve({ id: projOfficerProjectId }) });
+    assert.equal(regRes.status, 200);
+    const regJson = await regRes.json();
+    assert.equal(regJson.data.status, 'SUBMITTED', 'Registered project must enter SUBMITTED status for review');
   });
 
-  it('2. MINISTRY_ADMIN can create a project (returns 201)', async () => {
-    const req = new NextRequest('http://localhost:3000/api/projects', {
+  it('2. MINISTRY_ADMIN creates a project -> registers it -> enters SUBMITTED status for PROJECT_OFFICER review', async () => {
+    const createReq = new NextRequest('http://localhost:3000/api/projects', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', cookie: ministryAdminCreatorCookie },
       body: JSON.stringify({
-        name: `MA-Created Project ${ts}`,
+        name: `MA Railway Project ${ts}`,
         projectType: 'Railway',
         implementingAgencyId: nhaiAgencyId,
         administrativeUnitId: unitIdKA,
         landAcquisitionRequired: true,
       }),
     });
-    const res = await projectsPostHandler(req);
-    assert.equal(res.status, 201, 'MINISTRY_ADMIN must be able to create a project');
-    const json = await res.json();
+    const createRes = await projectsPostHandler(createReq);
+    assert.equal(createRes.status, 201);
+    const json = await createRes.json();
     ministryCreatedProjectId = json.data.id;
     createdProjectIds.push(ministryCreatedProjectId);
-    assert.equal(json.data.createdBy, ministryAdminCreatorId);
-  });
 
-  it('3. LAND_OFFICER cannot create a project (403 Forbidden)', async () => {
-    const req = new NextRequest('http://localhost:3000/api/projects', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', cookie: landOfficerCookie },
-      body: JSON.stringify({
-        name: `LO Tries Project ${ts}`,
-        projectType: 'Highway',
-        implementingAgencyId: nhaiAgencyId,
-        administrativeUnitId: unitIdKA,
-      }),
-    });
-    const res = await projectsPostHandler(req);
-    assert.equal(res.status, 403, 'LAND_OFFICER must be rejected from creating projects');
-  });
-
-  it('4. FIELD_OFFICER cannot create a project (403 Forbidden)', async () => {
-    const req = new NextRequest('http://localhost:3000/api/projects', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', cookie: fieldOfficerCookie },
-      body: JSON.stringify({
-        name: `FO Tries Project ${ts}`,
-        projectType: 'Highway',
-        implementingAgencyId: nhaiAgencyId,
-        administrativeUnitId: unitIdKA,
-      }),
-    });
-    const res = await projectsPostHandler(req);
-    assert.equal(res.status, 403, 'FIELD_OFFICER must be rejected from creating projects');
-  });
-
-  // ──────────────────────────────────────────────────────────────────────────────
-  // PROJECT UPDATE OWNERSHIP
-  // ──────────────────────────────────────────────────────────────────────────────
-
-  it('5. Original creator (PROJECT_OFFICER) can update their DRAFT project', async () => {
-    assert.ok(projOfficerProjectId, 'Project must exist');
-    const req = new NextRequest(`http://localhost:3000/api/projects/${projOfficerProjectId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', cookie: projOfficerCookie },
-      body: JSON.stringify({ name: `PO-Created Project Updated ${ts}` }),
-    });
-    const res = await projectDetailPatchHandler(req, { params: Promise.resolve({ id: projOfficerProjectId }) });
-    assert.equal(res.status, 200, 'Creator should be able to update their own DRAFT project');
-    const json = await res.json();
-    assert.ok(json.data.name.includes('Updated'));
-  });
-
-  it('6. Non-creator (MINISTRY_ADMIN reviewer) cannot update PROJECT_OFFICER-created project (403)', async () => {
-    assert.ok(projOfficerProjectId, 'Project must exist');
-    const req = new NextRequest(`http://localhost:3000/api/projects/${projOfficerProjectId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', cookie: ministryAdminCookie },
-      body: JSON.stringify({ name: `Should Not Be Allowed ${ts}` }),
-    });
-    const res = await projectDetailPatchHandler(req, { params: Promise.resolve({ id: projOfficerProjectId }) });
-    assert.equal(res.status, 403, 'Non-creator must be rejected from updating a project');
-  });
-
-  it('7. Non-creator (LAND_OFFICER) cannot update PROJECT_OFFICER-created project (403)', async () => {
-    assert.ok(projOfficerProjectId, 'Project must exist');
-    const req = new NextRequest(`http://localhost:3000/api/projects/${projOfficerProjectId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', cookie: landOfficerCookie },
-      body: JSON.stringify({ name: `LO Should Not Edit ${ts}` }),
-    });
-    const res = await projectDetailPatchHandler(req, { params: Promise.resolve({ id: projOfficerProjectId }) });
-    assert.equal(res.status, 403, 'LAND_OFFICER must be rejected from updating a project they did not create');
-  });
-
-  // ──────────────────────────────────────────────────────────────────────────────
-  // ACQUISITION CASE CREATION: REGISTERED PROJECTS ONLY & LAND_OFFICER ONLY
-  // ──────────────────────────────────────────────────────────────────────────────
-
-  it('7b. Rejects acquisition case creation for DRAFT project (400 Bad Request)', async () => {
-    assert.ok(projOfficerProjectId, 'Project must exist');
-    // projOfficerProjectId is currently in DRAFT status
-    const req = new NextRequest('http://localhost:3000/api/acquisition-cases', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', cookie: landOfficerCookie },
-      body: JSON.stringify({
-        projectId: projOfficerProjectId,
-        title: `Draft Project Case Attempt ${ts}`,
-      }),
-    });
-    const res = await casesPostHandler(req);
-    assert.equal(res.status, 400, 'Must reject case creation for project in DRAFT status');
-    const json = await res.json();
-    assert.ok(json.error.includes('REGISTERED'), 'Error must explain that project must be in REGISTERED status');
-  });
-
-  it('7c. Original creators formally register their projects (DRAFT -> REGISTERED)', async () => {
-    // Project Officer registers projOfficerProjectId
-    const regReq1 = new NextRequest(`http://localhost:3000/api/projects/${projOfficerProjectId}/register`, {
-      method: 'POST',
-      headers: { cookie: projOfficerCookie },
-    });
-    const regRes1 = await projectRegisterHandler(regReq1, { params: Promise.resolve({ id: projOfficerProjectId }) });
-    assert.equal(regRes1.status, 200, 'Original creator should be able to register project');
-    const regJson1 = await regRes1.json();
-    assert.equal(regJson1.data.status, 'REGISTERED');
-
-    // Ministry Admin registers ministryCreatedProjectId
-    const regReq2 = new NextRequest(`http://localhost:3000/api/projects/${ministryCreatedProjectId}/register`, {
+    const regReq = new NextRequest(`http://localhost:3000/api/projects/${ministryCreatedProjectId}/register`, {
       method: 'POST',
       headers: { cookie: ministryAdminCreatorCookie },
     });
-    const regRes2 = await projectRegisterHandler(regReq2, { params: Promise.resolve({ id: ministryCreatedProjectId }) });
-    assert.equal(regRes2.status, 200, 'Original creator should be able to register project');
-    const regJson2 = await regRes2.json();
-    assert.equal(regJson2.data.status, 'REGISTERED');
+    const regRes = await projectRegisterHandler(regReq, { params: Promise.resolve({ id: ministryCreatedProjectId }) });
+    assert.equal(regRes.status, 200);
+    const regJson = await regRes.json();
+    assert.equal(regJson.data.status, 'SUBMITTED');
   });
 
-  it('8. LAND_OFFICER can create an acquisition case on REGISTERED project (201)', async () => {
-    assert.ok(projOfficerProjectId, 'Project must exist');
-    const req = new NextRequest('http://localhost:3000/api/acquisition-cases', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', cookie: landOfficerCookie },
-      body: JSON.stringify({
-        projectId: projOfficerProjectId,
-        title: `LO Acquisition Case ${ts}`,
-        description: 'Created by Land Officer',
-      }),
-    });
-    const res = await casesPostHandler(req);
-    assert.equal(res.status, 201, 'LAND_OFFICER must be able to create an acquisition case');
-    const json = await res.json();
-    createdCaseIds.push(json.data.id);
-    assert.equal(json.data.createdBy, landOfficerId);
-  });
+  // ──────────────────────────────────────────────────────────────────────────────
+  // SCENARIO 4 & 5: Acquisition Case Creation Gates: DRAFT and SUBMITTED Rejected
+  // ──────────────────────────────────────────────────────────────────────────────
 
-  it('9. PROJECT_OFFICER cannot create an acquisition case (403)', async () => {
-    assert.ok(projOfficerProjectId, 'Project must exist');
-    const req = new NextRequest('http://localhost:3000/api/acquisition-cases', {
+  it('4. Project is still a draft -> acquisition case creation is rejected (400 Bad Request)', async () => {
+    // Create an un-registered DRAFT project
+    const draftReq = new NextRequest('http://localhost:3000/api/projects', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', cookie: projOfficerCookie },
       body: JSON.stringify({
-        projectId: projOfficerProjectId,
-        title: `PO Tries Case ${ts}`,
+        name: `Draft Only Project ${ts}`,
+        projectType: 'Water Supply',
+        implementingAgencyId: nhaiAgencyId,
+        administrativeUnitId: unitIdKA,
       }),
     });
-    const res = await casesPostHandler(req);
-    assert.equal(res.status, 403, 'PROJECT_OFFICER must be rejected from creating acquisition cases');
+    const draftRes = await projectsPostHandler(draftReq);
+    assert.equal(draftRes.status, 201);
+    draftProjectId = (await draftRes.json()).data.id;
+    createdProjectIds.push(draftProjectId);
+
+    // LAND_OFFICER attempts case creation on DRAFT project
+    const caseReq = new NextRequest('http://localhost:3000/api/acquisition-cases', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', cookie: landOfficerCookie },
+      body: JSON.stringify({
+        projectId: draftProjectId,
+        title: `Attempt Case on Draft ${ts}`,
+      }),
+    });
+    const caseRes = await casesPostHandler(caseReq);
+    assert.equal(caseRes.status, 400, 'Must reject case creation on DRAFT project');
+    const json = await caseRes.json();
+    assert.ok(json.error.toLowerCase().includes('draft'));
   });
 
-  it('10. MINISTRY_ADMIN cannot create an acquisition case (403)', async () => {
-    assert.ok(projOfficerProjectId, 'Project must exist');
-    const req = new NextRequest('http://localhost:3000/api/acquisition-cases', {
+  it('5. Project is pending review (SUBMITTED) -> acquisition case creation is rejected (400 Bad Request)', async () => {
+    // projOfficerProjectId is currently in SUBMITTED status (pending counterpart review)
+    const caseReq = new NextRequest('http://localhost:3000/api/acquisition-cases', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', cookie: ministryAdminCookie },
+      headers: { 'Content-Type': 'application/json', cookie: landOfficerCookie },
       body: JSON.stringify({
         projectId: projOfficerProjectId,
-        title: `MA Tries Case ${ts}`,
+        title: `Attempt Case on Submitted Project ${ts}`,
       }),
     });
-    const res = await casesPostHandler(req);
-    assert.equal(res.status, 403, 'MINISTRY_ADMIN must be rejected from creating acquisition cases');
+    const caseRes = await casesPostHandler(caseReq);
+    assert.equal(caseRes.status, 400, 'Must reject case creation on pending-review project');
+    const json = await caseRes.json();
+    assert.ok(json.error.toLowerCase().includes('pending review') || json.error.toLowerCase().includes('accepted'));
   });
 
   // ──────────────────────────────────────────────────────────────────────────────
-  // COUNTERPART-ROLE REVIEW: PROJECT_OFFICER project → MINISTRY_ADMIN reviews
+  // SCENARIO 6: Counterpart Review Rules & Correction Cycle
   // ──────────────────────────────────────────────────────────────────────────────
 
-  it('11. MINISTRY_ADMIN (counterpart) can permit field verification on PROJECT_OFFICER-created project case (200)', async () => {
-    // Create and submit a case
-    const createReq = new NextRequest('http://localhost:3000/api/acquisition-cases', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', cookie: landOfficerCookie },
-      body: JSON.stringify({
-        projectId: projOfficerProjectId,
-        title: `Counterpart Review Case 1 ${ts}`,
-      }),
-    });
-    const createRes = await casesPostHandler(createReq);
-    assert.equal(createRes.status, 201);
-    const caseId = (await createRes.json()).data.id;
-    createdCaseIds.push(caseId);
-
-    const submitReq = new NextRequest(`http://localhost:3000/api/acquisition-cases/${caseId}/submit`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', cookie: landOfficerCookie },
-      body: JSON.stringify({ remarks: 'Submitting for counterpart review' }),
-    });
-    await caseSubmitHandler(submitReq, { params: Promise.resolve({ id: caseId }) });
-
-    const reviewReq = new NextRequest(`http://localhost:3000/api/acquisition-cases/${caseId}/review`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', cookie: ministryAdminCookie },
-      body: JSON.stringify({ decision: 'PERMIT_FIELD_VERIFICATION', remarks: 'Counterpart authorized' }),
-    });
-    const reviewRes = await caseReviewHandler(reviewReq, { params: Promise.resolve({ id: caseId }) });
-    assert.equal(reviewRes.status, 200, 'MINISTRY_ADMIN counterpart must be able to permit field verification');
-    const json = await reviewRes.json();
-    assert.equal(json.data.status, 'AWAITING_FIELD_VERIFICATION');
-  });
-
-  it('12. PROJECT_OFFICER (project creator) cannot review their own project\'s acquisition case (403)', async () => {
-    const createReq = new NextRequest('http://localhost:3000/api/acquisition-cases', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', cookie: landOfficerCookie },
-      body: JSON.stringify({
-        projectId: projOfficerProjectId,
-        title: `Self-Review Blocked Case ${ts}`,
-      }),
-    });
-    const createRes = await casesPostHandler(createReq);
-    assert.equal(createRes.status, 201);
-    const caseId = (await createRes.json()).data.id;
-    createdCaseIds.push(caseId);
-
-    const submitReq = new NextRequest(`http://localhost:3000/api/acquisition-cases/${caseId}/submit`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', cookie: landOfficerCookie },
-      body: JSON.stringify({}),
-    });
-    await caseSubmitHandler(submitReq, { params: Promise.resolve({ id: caseId }) });
-
-    // PROJECT_OFFICER (the project creator) attempts to review — must be rejected
-    const reviewReq = new NextRequest(`http://localhost:3000/api/acquisition-cases/${caseId}/review`, {
+  it('6a. Separation of duties: Creator cannot review their own project (403 Forbidden)', async () => {
+    const reviewReq = new NextRequest(`http://localhost:3000/api/projects/${projOfficerProjectId}/review`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', cookie: projOfficerCookie },
-      body: JSON.stringify({ decision: 'PERMIT_FIELD_VERIFICATION', remarks: 'Self-review attempt' }),
+      body: JSON.stringify({ decision: 'ACCEPT' }),
     });
-    const reviewRes = await caseReviewHandler(reviewReq, { params: Promise.resolve({ id: caseId }) });
-    assert.equal(reviewRes.status, 403, 'Project creator must not be able to review their own project\'s acquisition case');
+    const reviewRes = await projectReviewHandler(reviewReq, { params: Promise.resolve({ id: projOfficerProjectId }) });
+    assert.equal(reviewRes.status, 403, 'Creator cannot review own project');
   });
 
-  it('13. Land Officer (case preparer) cannot review the case they submitted (403)', async () => {
-    const createReq = new NextRequest('http://localhost:3000/api/acquisition-cases', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', cookie: landOfficerCookie },
-      body: JSON.stringify({
-        projectId: projOfficerProjectId,
-        title: `Preparer Self-Review Blocked ${ts}`,
-      }),
-    });
-    const createRes = await casesPostHandler(createReq);
-    assert.equal(createRes.status, 201);
-    const caseId = (await createRes.json()).data.id;
-    createdCaseIds.push(caseId);
-
-    const submitReq = new NextRequest(`http://localhost:3000/api/acquisition-cases/${caseId}/submit`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', cookie: landOfficerCookie },
-      body: JSON.stringify({}),
-    });
-    await caseSubmitHandler(submitReq, { params: Promise.resolve({ id: caseId }) });
-
-    // LAND_OFFICER who submitted attempts to review — even if they somehow had review permission
-    // (In practice they don't, but the error must be 403 for the right reason)
-    const reviewReq = new NextRequest(`http://localhost:3000/api/acquisition-cases/${caseId}/review`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', cookie: landOfficerCookie },
-      body: JSON.stringify({ decision: 'RETURN_FOR_CORRECTION', remarks: 'Self-review attempt by preparer' }),
-    });
-    const reviewRes = await caseReviewHandler(reviewReq, { params: Promise.resolve({ id: caseId }) });
-    // LAND_OFFICER lacks ACQUISITION_CASE_REVIEW permission → 403 (either for permission or for being the preparer)
-    assert.equal(reviewRes.status, 403, 'Case preparer (Land Officer) must not be able to review the case');
-  });
-
-  it('14. Wrong counterpart: PROJECT_OFFICER cannot review MINISTRY_ADMIN-created project case (403)', async () => {
-    // ministryAdminCreatorId created ministryCreatedProjectId
-    // ProjOfficer is the required counterpart, but let's verify the opposite is blocked:
-    // Here we test that ministryAdminCookie (same role as the creator) is blocked
-    const createReq = new NextRequest('http://localhost:3000/api/acquisition-cases', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', cookie: landOfficerCookie },
-      body: JSON.stringify({
-        projectId: ministryCreatedProjectId,
-        title: `MA-Project Case Wrong Counterpart ${ts}`,
-      }),
-    });
-    const createRes = await casesPostHandler(createReq);
-    assert.equal(createRes.status, 201);
-    const caseId = (await createRes.json()).data.id;
-    createdCaseIds.push(caseId);
-
-    const submitReq = new NextRequest(`http://localhost:3000/api/acquisition-cases/${caseId}/submit`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', cookie: landOfficerCookie },
-      body: JSON.stringify({}),
-    });
-    await caseSubmitHandler(submitReq, { params: Promise.resolve({ id: caseId }) });
-
-    // ministryAdminCookie is also MINISTRY_ADMIN — same side as the creator (wrong counterpart)
-    const reviewReq = new NextRequest(`http://localhost:3000/api/acquisition-cases/${caseId}/review`, {
+  it('6b. Counterpart role check: Same role cannot review (403 Forbidden)', async () => {
+    // ministryAdminCookie attempts to review ministryCreatedProjectId (both are MINISTRY_ADMIN)
+    const reviewReq = new NextRequest(`http://localhost:3000/api/projects/${ministryCreatedProjectId}/review`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', cookie: ministryAdminCookie },
-      body: JSON.stringify({ decision: 'PERMIT_FIELD_VERIFICATION', remarks: 'Same-side review attempt' }),
+      body: JSON.stringify({ decision: 'ACCEPT' }),
     });
-    const reviewRes = await caseReviewHandler(reviewReq, { params: Promise.resolve({ id: caseId }) });
-    assert.equal(reviewRes.status, 403, 'MINISTRY_ADMIN cannot review MINISTRY_ADMIN-created project (wrong counterpart)');
+    const reviewRes = await projectReviewHandler(reviewReq, { params: Promise.resolve({ id: ministryCreatedProjectId }) });
+    assert.equal(reviewRes.status, 403, 'MINISTRY_ADMIN cannot review MINISTRY_ADMIN project');
   });
 
-  it('15. Correct counterpart: PROJECT_OFFICER can review MINISTRY_ADMIN-created project case (200)', async () => {
-    const createReq = new NextRequest('http://localhost:3000/api/acquisition-cases', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', cookie: landOfficerCookie },
-      body: JSON.stringify({
-        projectId: ministryCreatedProjectId,
-        title: `MA-Project Case Correct Counterpart ${ts}`,
-      }),
-    });
-    const createRes = await casesPostHandler(createReq);
-    assert.equal(createRes.status, 201);
-    const caseId = (await createRes.json()).data.id;
-    createdCaseIds.push(caseId);
-
-    const submitReq = new NextRequest(`http://localhost:3000/api/acquisition-cases/${caseId}/submit`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', cookie: landOfficerCookie },
-      body: JSON.stringify({}),
-    });
-    await caseSubmitHandler(submitReq, { params: Promise.resolve({ id: caseId }) });
-
-    // projOfficerCookie is PROJECT_OFFICER — the counterpart for MINISTRY_ADMIN-created project
-    const reviewReq = new NextRequest(`http://localhost:3000/api/acquisition-cases/${caseId}/review`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', cookie: projOfficerCookie },
-      body: JSON.stringify({ decision: 'RETURN_FOR_CORRECTION', remarks: 'Requires more detail on survey boundary' }),
-    });
-    const reviewRes = await caseReviewHandler(reviewReq, { params: Promise.resolve({ id: caseId }) });
-    assert.equal(reviewRes.status, 200, 'PROJECT_OFFICER (counterpart) must be able to review MINISTRY_ADMIN-created project case');
-    const json = await reviewRes.json();
-    assert.equal(json.data.status, 'RETURNED_FOR_CORRECTION');
-  });
-
-  // ──────────────────────────────────────────────────────────────────────────────
-  // CORRECTION WORKFLOW: project unlocked → creator edits → resubmit
-  // ──────────────────────────────────────────────────────────────────────────────
-
-  it('16. When case is RETURNED_FOR_CORRECTION, linked project is unlocked for correction by creator', async () => {
-    // Create a fresh case on projOfficerProjectId and return it for correction
-    const createReq = new NextRequest('http://localhost:3000/api/acquisition-cases', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', cookie: landOfficerCookie },
-      body: JSON.stringify({
-        projectId: projOfficerProjectId,
-        title: `Correction Unlock Test Case ${ts}`,
-      }),
-    });
-    const createRes = await casesPostHandler(createReq);
-    assert.equal(createRes.status, 201);
-    const caseId = (await createRes.json()).data.id;
-    createdCaseIds.push(caseId);
-
-    const submitReq = new NextRequest(`http://localhost:3000/api/acquisition-cases/${caseId}/submit`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', cookie: landOfficerCookie },
-      body: JSON.stringify({}),
-    });
-    await caseSubmitHandler(submitReq, { params: Promise.resolve({ id: caseId }) });
-
-    // MINISTRY_ADMIN returns for correction
-    const reviewReq = new NextRequest(`http://localhost:3000/api/acquisition-cases/${caseId}/review`, {
+  it('6c. Counterpart requests corrections -> project enters correction-pending state', async () => {
+    const reviewReq = new NextRequest(`http://localhost:3000/api/projects/${projOfficerProjectId}/review`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', cookie: ministryAdminCookie },
-      body: JSON.stringify({ decision: 'RETURN_FOR_CORRECTION', remarks: 'Please revise the project boundary.' }),
+      body: JSON.stringify({
+        decision: 'REQUEST_CORRECTIONS',
+        remarks: 'Please clarify the estimated cost and project scope.',
+      }),
     });
-    const reviewRes = await caseReviewHandler(reviewReq, { params: Promise.resolve({ id: caseId }) });
+    const reviewRes = await projectReviewHandler(reviewReq, { params: Promise.resolve({ id: projOfficerProjectId }) });
     assert.equal(reviewRes.status, 200);
-    assert.equal((await reviewRes.json()).data.status, 'RETURNED_FOR_CORRECTION');
-
-    // Verify project is now unlocked (correctionPendingFor set)
-    const [proj] = await db
-      .select({ correctionPendingFor: projects.correctionPendingFor })
-      .from(projects)
-      .where(eq(projects.id, projOfficerProjectId))
-      .limit(1);
-    assert.ok(proj.correctionPendingFor, 'Project correctionPendingFor must be set after RETURN_FOR_CORRECTION');
-    assert.equal(proj.correctionPendingFor, caseId, 'correctionPendingFor must reference the triggering case');
+    const json = await reviewRes.json();
+    assert.ok(json.data.correctionPendingFor, 'Project correctionPendingFor must be set');
   });
 
-  it('17. While project is in correction cycle, original creator can edit it (200)', async () => {
-    // At this point projOfficerProjectId has correctionPendingFor set (from test 16)
-    const req = new NextRequest(`http://localhost:3000/api/projects/${projOfficerProjectId}`, {
+  it('6d. Project has correction requested -> acquisition case creation is rejected (400 Bad Request)', async () => {
+    const caseReq = new NextRequest('http://localhost:3000/api/acquisition-cases', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', cookie: landOfficerCookie },
+      body: JSON.stringify({
+        projectId: projOfficerProjectId,
+        title: `Attempt Case on Project with Corrections ${ts}`,
+      }),
+    });
+    const caseRes = await casesPostHandler(caseReq);
+    assert.equal(caseRes.status, 400, 'Must reject case creation when corrections are pending');
+    const json = await caseRes.json();
+    assert.ok(json.error.toLowerCase().includes('correction'));
+  });
+
+  it('6e. Creator regains editing access, updates project, and resubmits after correction', async () => {
+    // Creator edits project during correction cycle
+    const patchReq = new NextRequest(`http://localhost:3000/api/projects/${projOfficerProjectId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', cookie: projOfficerCookie },
-      body: JSON.stringify({ name: `PO-Project Corrected ${ts}` }),
+      body: JSON.stringify({
+        description: `Updated project scope during correction cycle ${ts}`,
+      }),
     });
-    const res = await projectDetailPatchHandler(req, { params: Promise.resolve({ id: projOfficerProjectId }) });
-    assert.equal(res.status, 200, 'Creator must be able to edit project during correction cycle');
-    const json = await res.json();
-    assert.ok(json.data.name.includes('Corrected'));
-  });
+    const patchRes = await projectDetailPatchHandler(patchReq, { params: Promise.resolve({ id: projOfficerProjectId }) });
+    assert.equal(patchRes.status, 200, 'Creator must be able to edit during correction cycle');
 
-  it('18. While project is in correction cycle, non-creator still cannot edit it (403)', async () => {
-    const req = new NextRequest(`http://localhost:3000/api/projects/${projOfficerProjectId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', cookie: ministryAdminCookie },
-      body: JSON.stringify({ name: `Non-creator Edit During Correction ${ts}` }),
-    });
-    const res = await projectDetailPatchHandler(req, { params: Promise.resolve({ id: projOfficerProjectId }) });
-    assert.equal(res.status, 403, 'Non-creator must still be blocked during correction cycle');
-  });
-
-  it('19. Creator resubmits corrected project, clearing correctionPendingFor (200)', async () => {
-    const req = new NextRequest(`http://localhost:3000/api/projects/${projOfficerProjectId}/resubmit`, {
+    // Creator resubmits
+    const resubmitReq = new NextRequest(`http://localhost:3000/api/projects/${projOfficerProjectId}/resubmit`, {
       method: 'POST',
       headers: { cookie: projOfficerCookie },
     });
-    const res = await projectResubmitHandler(req, { params: Promise.resolve({ id: projOfficerProjectId }) });
-    assert.equal(res.status, 200, 'Creator resubmit must succeed');
-    const json = await res.json();
-    assert.equal(json.data.correctionPendingFor, null, 'correctionPendingFor must be cleared after resubmission');
+    const resubmitRes = await projectResubmitHandler(resubmitReq, { params: Promise.resolve({ id: projOfficerProjectId }) });
+    assert.equal(resubmitRes.status, 200);
+    const resubmitJson = await resubmitRes.json();
+    assert.equal(resubmitJson.data.correctionPendingFor, null, 'correctionPendingFor must be cleared');
+    assert.equal(resubmitJson.data.status, 'SUBMITTED', 'Project must return to SUBMITTED status');
   });
 
-  it('20. After resubmission creator can no longer edit REGISTERED project (400)', async () => {
-    // After the correction cycle, project returns to REGISTERED (non-editable) status
-    // and correctionPendingFor is null, so editing is blocked by the workflow-state check
-    const [proj] = await db
-      .select({ status: projects.status, correctionPendingFor: projects.correctionPendingFor })
-      .from(projects)
-      .where(eq(projects.id, projOfficerProjectId))
-      .limit(1);
+  // ──────────────────────────────────────────────────────────────────────────────
+  // SCENARIO 3: Project is Accepted -> LAND_OFFICER can create Acquisition Case
+  // ──────────────────────────────────────────────────────────────────────────────
 
-    // Skip this assertion if project is still in DRAFT (no transition happened, expected in test environments)
-    if (proj.status !== 'DRAFT' && !proj.correctionPendingFor) {
-      const req = new NextRequest(`http://localhost:3000/api/projects/${projOfficerProjectId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', cookie: projOfficerCookie },
-        body: JSON.stringify({ name: `Should Be Blocked Post-Correction ${ts}` }),
-      });
-      const res = await projectDetailPatchHandler(req, { params: Promise.resolve({ id: projOfficerProjectId }) });
-      assert.equal(res.status, 400, 'Creator must not edit a non-DRAFT project after correction cycle ends');
-    } else {
-      // In test environment projects may remain DRAFT — verify correctionPendingFor is null
-      assert.equal(proj.correctionPendingFor, null, 'correctionPendingFor must be null after resubmission');
-    }
+  it('3a. Counterpart reviewers accept both projects (SUBMITTED -> ACCEPTED)', async () => {
+    // MINISTRY_ADMIN accepts PO project
+    const reviewReq1 = new NextRequest(`http://localhost:3000/api/projects/${projOfficerProjectId}/review`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', cookie: ministryAdminCookie },
+      body: JSON.stringify({ decision: 'ACCEPT', remarks: 'Project accepted' }),
+    });
+    const reviewRes1 = await projectReviewHandler(reviewReq1, { params: Promise.resolve({ id: projOfficerProjectId }) });
+    assert.equal(reviewRes1.status, 200);
+    assert.equal((await reviewRes1.json()).data.status, 'ACCEPTED');
+
+    // PROJECT_OFFICER accepts MA project
+    const reviewReq2 = new NextRequest(`http://localhost:3000/api/projects/${ministryCreatedProjectId}/review`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', cookie: projOfficerCookie },
+      body: JSON.stringify({ decision: 'ACCEPT', remarks: 'Project accepted by PO' }),
+    });
+    const reviewRes2 = await projectReviewHandler(reviewReq2, { params: Promise.resolve({ id: ministryCreatedProjectId }) });
+    assert.equal(reviewRes2.status, 200);
+    assert.equal((await reviewRes2.json()).data.status, 'ACCEPTED');
   });
 
-  it('21. Non-creator cannot call resubmit endpoint (403)', async () => {
-    // Set up a correction for ministryCreatedProjectId to test resubmit restriction
-    const createReq = new NextRequest('http://localhost:3000/api/acquisition-cases', {
+  it('3b. Project is accepted -> LAND_OFFICER can create an acquisition case (201 Created)', async () => {
+    const caseReq = new NextRequest('http://localhost:3000/api/acquisition-cases', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', cookie: landOfficerCookie },
       body: JSON.stringify({
-        projectId: ministryCreatedProjectId,
-        title: `Non-creator Resubmit Test ${ts}`,
+        projectId: projOfficerProjectId,
+        title: `Active Highway Acquisition Case ${ts}`,
+        description: 'Case created on accepted project',
       }),
     });
-    const createRes = await casesPostHandler(createReq);
-    assert.equal(createRes.status, 201);
-    const caseId = (await createRes.json()).data.id;
-    createdCaseIds.push(caseId);
+    const caseRes = await casesPostHandler(caseReq);
+    assert.equal(caseRes.status, 201, 'LAND_OFFICER must be able to create case on ACCEPTED project');
+    const json = await caseRes.json();
+    activeCaseId = json.data.id;
+    createdCaseIds.push(activeCaseId);
+    assert.equal(json.data.createdBy, landOfficerId);
+  });
 
-    await caseSubmitHandler(
-      new NextRequest(`http://localhost:3000/api/acquisition-cases/${caseId}/submit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', cookie: landOfficerCookie },
-        body: JSON.stringify({}),
-      }),
-      { params: Promise.resolve({ id: caseId }) }
+  // ──────────────────────────────────────────────────────────────────────────────
+  // SCENARIO 7: Newly created acquisition case -> NO opponent-role approval required
+  // ──────────────────────────────────────────────────────────────────────────────
+
+  it('7. Newly created case enters AWAITING_FIELD_VERIFICATION immediately (no opponent approval needed)', async () => {
+    assert.ok(activeCaseId, 'Case must exist');
+    const getReq = new NextRequest(`http://localhost:3000/api/acquisition-cases/${activeCaseId}`, {
+      headers: { cookie: landOfficerCookie },
+    });
+    const getRes = await caseDetailGetHandler(getReq, { params: Promise.resolve({ id: activeCaseId }) });
+    assert.equal(getRes.status, 200);
+    const json = await getRes.json();
+    assert.equal(
+      json.data.status,
+      'AWAITING_FIELD_VERIFICATION',
+      'Case status must be AWAITING_FIELD_VERIFICATION directly on creation'
     );
+  });
 
-    // Correct counterpart (PROJECT_OFFICER) returns for correction
-    await caseReviewHandler(
-      new NextRequest(`http://localhost:3000/api/acquisition-cases/${caseId}/review`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', cookie: projOfficerCookie },
-        body: JSON.stringify({ decision: 'RETURN_FOR_CORRECTION', remarks: 'Fix the description' }),
-      }),
-      { params: Promise.resolve({ id: caseId }) }
-    );
+  // ──────────────────────────────────────────────────────────────────────────────
+  // SCENARIO 8: FIELD_OFFICER can immediately access newly created case
+  // ──────────────────────────────────────────────────────────────────────────────
 
-    // Non-creator (ministry admin reviewer, NOT the creator of ministryCreatedProjectId) tries to resubmit
-    const req = new NextRequest(`http://localhost:3000/api/projects/${ministryCreatedProjectId}/resubmit`, {
+  it('8. FIELD_OFFICER can immediately access newly created case within authorized scope (200 OK)', async () => {
+    assert.ok(activeCaseId, 'Case must exist');
+    const getReq = new NextRequest(`http://localhost:3000/api/acquisition-cases/${activeCaseId}`, {
+      headers: { cookie: fieldOfficerCookie },
+    });
+    const getRes = await caseDetailGetHandler(getReq, { params: Promise.resolve({ id: activeCaseId }) });
+    assert.equal(getRes.status, 200, 'FIELD_OFFICER must be able to view case');
+    const json = await getRes.json();
+    assert.equal(json.data.id, activeCaseId);
+    assert.equal(json.data.status, 'AWAITING_FIELD_VERIFICATION');
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────────
+  // SCENARIO 9: FIELD_OFFICER can immediately create parcel records
+  // ──────────────────────────────────────────────────────────────────────────────
+
+  it('9. FIELD_OFFICER can immediately create parcel records on the newly created case (201 Created)', async () => {
+    assert.ok(activeCaseId, 'Case must exist');
+    const parcelReq = new NextRequest(`http://localhost:3000/api/acquisition-cases/${activeCaseId}/parcels`, {
       method: 'POST',
-      headers: { cookie: ministryAdminCookie }, // ministryAdminCookie is NOT the creator
+      headers: { 'Content-Type': 'application/json', cookie: fieldOfficerCookie },
+      body: JSON.stringify({
+        state: 'Karnataka',
+        district: 'Bengaluru Urban',
+        taluk: 'Bengaluru South',
+        village: 'Begur',
+        surveyNumber: `SY-${ts}`,
+        totalArea: 1000,
+        areaUnit: 'SQ_M',
+        proposedAffectedArea: 500,
+        affectedAreaUnit: 'SQ_M',
+      }),
     });
-    const res = await projectResubmitHandler(req, { params: Promise.resolve({ id: ministryCreatedProjectId }) });
-    assert.equal(res.status, 403, 'Non-creator must not be able to resubmit corrected project');
+    const parcelRes = await parcelsPostHandler(parcelReq, { params: Promise.resolve({ id: activeCaseId }) });
+    assert.equal(parcelRes.status, 201, 'FIELD_OFFICER must be able to create parcel record immediately');
+    const json = await parcelRes.json();
+    assert.ok(json.data.id, 'Parcel record must have an ID');
+    createdParcelIds.push(json.data.parcel.id);
+  });
 
-    // Cleanup: clear the correctionPendingFor so other tests aren't affected
-    await db.update(projects)
-      .set({ correctionPendingFor: null })
-      .where(eq(projects.id, ministryCreatedProjectId));
+  // ──────────────────────────────────────────────────────────────────────────────
+  // SCENARIO 10 & 11: Case listing and workflows remain unaffected
+  // ──────────────────────────────────────────────────────────────────────────────
+
+  it('10. LAND_OFFICER and FIELD_OFFICER can list active cases ready for verification', async () => {
+    const listReq = new NextRequest(`http://localhost:3000/api/acquisition-cases?status=AWAITING_FIELD_VERIFICATION`, {
+      headers: { cookie: fieldOfficerCookie },
+    });
+    const listRes = await casesListHandler(listReq);
+    assert.equal(listRes.status, 200);
+    const json = await listRes.json();
+    assert.ok(Array.isArray(json.data));
+    const found = json.data.some((c: { id: string }) => c.id === activeCaseId);
+    assert.ok(found, 'Created case must be listed in AWAITING_FIELD_VERIFICATION query');
+  });
+
+  it('11. Non-LAND_OFFICER cannot create acquisition cases (403 Forbidden)', async () => {
+    // FIELD_OFFICER tries to create a case
+    const caseReq = new NextRequest('http://localhost:3000/api/acquisition-cases', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', cookie: fieldOfficerCookie },
+      body: JSON.stringify({
+        projectId: projOfficerProjectId,
+        title: `FO Tries Case ${ts}`,
+      }),
+    });
+    const caseRes = await casesPostHandler(caseReq);
+    assert.equal(caseRes.status, 403, 'FIELD_OFFICER cannot create acquisition cases');
   });
 });

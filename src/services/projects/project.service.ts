@@ -19,12 +19,14 @@ import type {
   UpdateProjectInput,
   ProjectQueryInput,
   UpdateProjectStatusInput,
+  ReviewProjectInput,
 } from '../../validators/projects';
 import type { ProjectStatus } from '../../../db/schema/projects';
 import {
   BadRequestError,
   NotFoundError,
   ForbiddenError,
+  ConflictError,
 } from '../../types';
 
 export interface PaginatedProjectsResult {
@@ -39,11 +41,14 @@ export interface PaginatedProjectsResult {
 
 // Valid status transitions map
 const VALID_TRANSITIONS: Record<ProjectStatus, ProjectStatus[]> = {
-  DRAFT: ['REGISTERED', 'CANCELLED'],
-  REGISTERED: ['ON_HOLD', 'COMPLETED', 'CANCELLED'],
-  ON_HOLD: ['REGISTERED', 'CANCELLED'],
+  DRAFT: ['SUBMITTED', 'REGISTERED', 'CANCELLED'],
+  SUBMITTED: ['ACCEPTED', 'REGISTERED', 'ON_HOLD', 'REJECTED', 'CANCELLED'],
+  ACCEPTED: ['ON_HOLD', 'COMPLETED', 'CANCELLED'],
+  REGISTERED: ['ACCEPTED', 'SUBMITTED', 'ON_HOLD', 'COMPLETED', 'CANCELLED'],
+  ON_HOLD: ['ACCEPTED', 'REGISTERED', 'SUBMITTED', 'CANCELLED'],
   COMPLETED: [], // Terminal
   CANCELLED: [], // Terminal
+  REJECTED: [], // Terminal
 };
 
 export class ProjectService {
@@ -401,7 +406,8 @@ export class ProjectService {
     }
 
     await projectRepository.updateProject(projectId, {
-      status: 'REGISTERED',
+      status: 'SUBMITTED',
+      updatedAt: new Date(),
     });
 
     const updated = await projectRepository.findProjectById(projectId);
@@ -532,6 +538,7 @@ export class ProjectService {
     }
 
     await projectRepository.updateProject(projectId, {
+      status: 'SUBMITTED',
       correctionPendingFor: null,
       updatedAt: new Date(),
     });
@@ -539,6 +546,121 @@ export class ProjectService {
     const updated = await projectRepository.findProjectById(projectId);
     if (!updated) {
       throw new Error('Failed to retrieve project after correction resubmission');
+    }
+
+    return updated;
+  }
+
+  /**
+   * Reviews a registered/submitted project and records an authorized workflow transition decision.
+   * Permitted decisions and resulting transitions:
+   *   ACCEPT / APPROVE: SUBMITTED -> ACCEPTED
+   *   REQUEST_CORRECTIONS / RETURN_FOR_CORRECTION: Unlocks project for creator editing (sets correctionPendingFor)
+   *   REJECT: SUBMITTED -> REJECTED
+   *
+   * Enforces:
+   *   - Separation-of-duties: Project creator cannot review their own project.
+   *   - Counterpart-role enforcement:
+   *     If created by PROJECT_OFFICER => reviewer must have MINISTRY_ADMIN.
+   *     If created by MINISTRY_ADMIN => reviewer must have PROJECT_OFFICER.
+   *   - Administrative scope check over project's administrativeUnitId.
+   */
+  async reviewProject(
+    projectId: string,
+    input: ReviewProjectInput,
+    userId: string
+  ): Promise<ProjectWithRelations> {
+    // 1. Permission check
+    await permissionService.requirePermission(userId, 'PROJECT_VIEW');
+
+    // 2. Validate project exists
+    const project = await projectRepository.findProjectById(projectId);
+    if (!project) {
+      throw new NotFoundError(`Project with ID '${projectId}' not found`);
+    }
+
+    // 3. Administrative scope check
+    const inScope = await scopeService.isWithinAdministrativeScope(
+      userId,
+      project.administrativeUnitId
+    );
+    if (!inScope) {
+      throw new ForbiddenError(
+        'Forbidden: project is outside your authorized administrative scope'
+      );
+    }
+
+    // 4. Separation-of-duties: reviewer cannot be the project creator
+    if (userId === project.createdBy) {
+      throw new ForbiddenError(
+        'Forbidden: The project creator cannot review their own project'
+      );
+    }
+
+    // 5. Counterpart-role enforcement
+    const projectCreatorRoles = await permissionService.getUserRoles(project.createdBy);
+    const reviewerRoles = await permissionService.getUserRoles(userId);
+
+    let requiredCounterpartRole: string | null = null;
+    if (projectCreatorRoles.includes('PROJECT_OFFICER')) {
+      requiredCounterpartRole = 'MINISTRY_ADMIN';
+    } else if (projectCreatorRoles.includes('MINISTRY_ADMIN')) {
+      requiredCounterpartRole = 'PROJECT_OFFICER';
+    }
+
+    if (requiredCounterpartRole) {
+      if (!reviewerRoles.includes(requiredCounterpartRole)) {
+        throw new ForbiddenError(
+          `Forbidden: Independent counterpart-role review is required. ` +
+          `This project was created by a ${projectCreatorRoles.includes('PROJECT_OFFICER') ? 'Project Officer' : 'Ministry Admin'}, ` +
+          `so the reviewer must hold the '${requiredCounterpartRole}' role. ` +
+          `Your current roles do not include '${requiredCounterpartRole}'.`
+        );
+      }
+    }
+
+    // 6. Project state validation
+    if (project.correctionPendingFor) {
+      throw new BadRequestError(
+        'Cannot review project: project has active corrections pending resubmission by the creator'
+      );
+    }
+
+    if (project.status === 'DRAFT') {
+      throw new BadRequestError(
+        'Cannot review project: project is still in DRAFT status and has not been registered/submitted for review'
+      );
+    }
+
+    if (project.status === 'ACCEPTED' || project.status === 'REJECTED') {
+      throw new ConflictError(
+        `Cannot review project: project has already been ${project.status.toLowerCase()}`
+      );
+    }
+
+    // 7. Process decision
+    const decision = input.decision;
+    if (decision === 'ACCEPT' || decision === 'APPROVE') {
+      await projectRepository.updateProject(projectId, {
+        status: 'ACCEPTED',
+        correctionPendingFor: null,
+        updatedAt: new Date(),
+      });
+    } else if (decision === 'REQUEST_CORRECTIONS' || decision === 'RETURN_FOR_CORRECTION') {
+      await projectRepository.updateProject(projectId, {
+        correctionPendingFor: projectId,
+        updatedAt: new Date(),
+      });
+    } else if (decision === 'REJECT') {
+      await projectRepository.updateProject(projectId, {
+        status: 'REJECTED',
+        updatedAt: new Date(),
+      });
+    }
+
+    const updated = await projectRepository.findProjectById(projectId);
+    if (!updated) {
+      throw new Error('Failed to retrieve updated project after review');
     }
 
     return updated;

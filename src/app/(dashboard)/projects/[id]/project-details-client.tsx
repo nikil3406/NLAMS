@@ -10,6 +10,7 @@ interface ProjectDetailsClientProps {
   projectId: string;
   currentUserId: string;
   userPermissions: string[];
+  userRoles?: string[];
   isSuperAdmin: boolean;
 }
 
@@ -17,6 +18,7 @@ export function ProjectDetailsClient({
   projectId,
   currentUserId,
   userPermissions,
+  userRoles = [],
   isSuperAdmin,
 }: ProjectDetailsClientProps) {
 
@@ -33,6 +35,63 @@ export function ProjectDetailsClient({
   // Status transition modal state
   const [statusModalTarget, setStatusModalTarget] = useState<ProjectStatus | null>(null);
   const [statusReason, setStatusReason] = useState('');
+
+  // Project Review Modal State
+  const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
+  const [reviewDecision, setReviewDecision] = useState<'ACCEPT' | 'REQUEST_CORRECTIONS' | 'REJECT'>('ACCEPT');
+  const [reviewRemarks, setReviewRemarks] = useState('');
+  const [isSubmittingReview, setIsSubmittingReview] = useState(false);
+  const [reviewError, setReviewError] = useState<string | null>(null);
+
+  const handleOpenReview = (decision: 'ACCEPT' | 'REQUEST_CORRECTIONS' | 'REJECT') => {
+    setReviewDecision(decision);
+    setReviewRemarks('');
+    setReviewError(null);
+    setIsReviewModalOpen(true);
+  };
+
+  const handleConfirmReview = async () => {
+    if (reviewDecision !== 'ACCEPT' && !reviewRemarks.trim()) {
+      setReviewError(
+        reviewDecision === 'REJECT'
+          ? 'A rejection reason is required.'
+          : 'Remarks explaining requested corrections are required.'
+      );
+      return;
+    }
+
+    setIsSubmittingReview(true);
+    setReviewError(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/review`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          decision: reviewDecision,
+          remarks: reviewRemarks.trim() || undefined,
+        }),
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || 'Failed to submit review decision');
+      }
+
+      setProject(json.data);
+      setIsReviewModalOpen(false);
+      setActionSuccessMessage(
+        reviewDecision === 'ACCEPT'
+          ? 'Project accepted successfully. It is now eligible for Acquisition Case creation.'
+          : reviewDecision === 'REQUEST_CORRECTIONS'
+          ? 'Project corrections requested. Project editing is now unlocked for the creator.'
+          : 'Project has been rejected.'
+      );
+    } catch (err: unknown) {
+      setReviewError(err instanceof Error ? err.message : 'Review action failed');
+    } finally {
+      setIsSubmittingReview(false);
+    }
+  };
 
   const loadProject = useCallback(async () => {
     setIsLoading(true);
@@ -155,6 +214,10 @@ export function ProjectDetailsClient({
 
   const getStatusBadgeClass = (status: string) => {
     switch (status) {
+      case 'ACCEPTED':
+        return 'badge-status active';
+      case 'SUBMITTED':
+        return 'badge-status pending';
       case 'REGISTERED':
         return 'badge-status active';
       case 'DRAFT':
@@ -164,6 +227,7 @@ export function ProjectDetailsClient({
       case 'COMPLETED':
         return 'badge-status active';
       case 'CANCELLED':
+      case 'REJECTED':
         return 'badge-status suspended';
       default:
         return 'badge-status inactive';
@@ -212,6 +276,18 @@ export function ProjectDetailsClient({
   const isTerminal = project.status === 'COMPLETED' || project.status === 'CANCELLED';
   const isUnderCorrection = Boolean(project.correctionPendingFor);
   const isEditableStatus = project.status === 'DRAFT' || isUnderCorrection;
+
+  const projectCreatorRoles: string[] = project.creatorRoles ?? [];
+  let requiredCounterpartRole: string | null = null;
+  if (projectCreatorRoles.includes('PROJECT_OFFICER')) {
+    requiredCounterpartRole = 'MINISTRY_ADMIN';
+  } else if (projectCreatorRoles.includes('MINISTRY_ADMIN')) {
+    requiredCounterpartRole = 'PROJECT_OFFICER';
+  }
+  const holdsCounterpartRole = requiredCounterpartRole
+    ? userRoles.includes(requiredCounterpartRole)
+    : true;
+  const isEligibleReviewer = !isCreator && holdsCounterpartRole;
 
   // Strict ownership enforcement: Only the original creator may edit or register
   const canEditProject = isCreator && canUpdate && !isTerminal && isEditableStatus;
@@ -392,7 +468,7 @@ export function ProjectDetailsClient({
           id="project-correction-cycle-banner"
         >
           <div style={{ fontSize: '0.875rem', color: '#fde047', lineHeight: '1.5', flex: 1, minWidth: '240px' }}>
-            <strong>Correction Cycle Active:</strong> An acquisition case returned for correction requires changes to this project. As the original creator, you may edit project details and submit corrections when finished.
+            <strong>Correction Cycle Active:</strong> Reviewer requested corrections for this project. As the original creator, you may edit project details and submit corrections when finished to return the project to the review queue.
           </div>
           <button
             type="button"
@@ -422,6 +498,101 @@ export function ProjectDetailsClient({
           id="project-correction-readonly-banner"
         >
           <strong>Correction Cycle Active:</strong> This project is currently unlocked for corrections by its original creator ({project.creator?.name ?? 'Project Creator'}). You cannot edit or submit corrections for this project.
+        </div>
+      )}
+
+      {/* Review Actions Banner for Eligible Counterpart Reviewer */}
+      {project.status === 'SUBMITTED' && !isUnderCorrection && isEligibleReviewer && (
+        <div
+          style={{
+            background: 'rgba(59, 130, 246, 0.08)',
+            border: '1px solid rgba(59, 130, 246, 0.28)',
+            borderRadius: '12px',
+            padding: '1.25rem',
+            marginBottom: '1.5rem',
+          }}
+          id="project-review-action-banner"
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+                <span style={{ color: '#60a5fa', fontSize: '0.9375rem', fontWeight: 600 }}>
+                  Project Pending Counterpart Review
+                </span>
+              </div>
+              <p style={{ margin: 0, fontSize: '0.8125rem', color: '#94a3b8' }}>
+                As an authorized counterpart official ({requiredCounterpartRole ?? 'Reviewer'}), review this registered project and decide whether to accept it, request corrections, or reject.
+              </p>
+            </div>
+            <div style={{ display: 'flex', gap: '0.625rem', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => handleOpenReview('ACCEPT')}
+                className="btn-primary"
+                style={{ backgroundColor: '#059669', borderColor: '#10b981', fontSize: '0.8125rem' }}
+                id="btn-accept-project"
+              >
+                ✓ Accept Project
+              </button>
+              <button
+                type="button"
+                onClick={() => handleOpenReview('REQUEST_CORRECTIONS')}
+                className="btn-secondary"
+                style={{ borderColor: 'rgba(245, 158, 11, 0.5)', color: '#fbbf24', fontSize: '0.8125rem' }}
+                id="btn-request-corrections"
+              >
+                ↩ Request Corrections
+              </button>
+              <button
+                type="button"
+                onClick={() => handleOpenReview('REJECT')}
+                className="btn-secondary"
+                style={{ borderColor: 'rgba(239, 68, 68, 0.5)', color: '#f87171', fontSize: '0.8125rem' }}
+                id="btn-reject-project"
+              >
+                ✕ Reject Project
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Pending Review Informational Banner for Non-Reviewers */}
+      {project.status === 'SUBMITTED' && !isUnderCorrection && !isEligibleReviewer && (
+        <div
+          style={{
+            background: isCreator ? 'rgba(59, 130, 246, 0.08)' : 'rgba(245, 158, 11, 0.08)',
+            border: isCreator ? '1px solid rgba(59, 130, 246, 0.25)' : '1px solid rgba(245, 158, 11, 0.3)',
+            borderRadius: '8px',
+            padding: '0.875rem 1rem',
+            marginBottom: '1.5rem',
+            fontSize: '0.8125rem',
+            color: isCreator ? '#93c5fd' : '#fde68a',
+          }}
+          id="project-pending-review-banner"
+        >
+          <strong>Project Submitted for Review:</strong>{' '}
+          {isCreator
+            ? 'This project has been formally submitted for review. Independent counterpart-role review is required — the project creator cannot review their own project.'
+            : `Independent counterpart-role review is required (${requiredCounterpartRole ?? 'counterpart role'}). Your current roles do not include the required counterpart role.`}
+        </div>
+      )}
+
+      {/* Project Accepted Banner */}
+      {project.status === 'ACCEPTED' && (
+        <div
+          style={{
+            background: 'rgba(16, 185, 129, 0.08)',
+            border: '1px solid rgba(16, 185, 129, 0.25)',
+            borderRadius: '8px',
+            padding: '0.875rem 1rem',
+            marginBottom: '1.5rem',
+            fontSize: '0.8125rem',
+            color: '#6ee7b7',
+          }}
+          id="project-accepted-banner"
+        >
+          <strong>Project Accepted & Approved:</strong> This infrastructure project has passed independent counterpart review and is accepted. Land Officers may now create acquisition cases for this project.
         </div>
       )}
 
@@ -761,6 +932,100 @@ export function ProjectDetailsClient({
                   id="btn-confirm-status-transition"
                 >
                   {isActionLoading ? 'Updating...' : `Confirm ${statusModalTarget}`}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Project Review Decision Modal */}
+      {isReviewModalOpen && (
+        <div className="modal-backdrop">
+          <div className="modal-card" style={{ maxWidth: '520px' }}>
+            <div className="modal-header">
+              <h2 className="modal-title">
+                {reviewDecision === 'ACCEPT'
+                  ? 'Accept & Approve Project'
+                  : reviewDecision === 'REQUEST_CORRECTIONS'
+                  ? 'Request Project Corrections'
+                  : 'Reject Project'}
+              </h2>
+              <button
+                type="button"
+                className="modal-close-btn"
+                onClick={() => setIsReviewModalOpen(false)}
+              >
+                ✕
+              </button>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                {reviewDecision === 'ACCEPT'
+                  ? 'Accepting this project authorizes it for acquisition case creation by Land Officers. Are you sure you want to proceed?'
+                  : reviewDecision === 'REQUEST_CORRECTIONS'
+                  ? 'Provide specific instructions and correction requirements. The project will be unlocked for the original creator to address corrections.'
+                  : 'Rejecting this project marks it as rejected and ineligible for acquisition case creation. Please state the reason for rejection.'}
+              </p>
+
+              {reviewError && (
+                <div className="alert-banner-error" role="alert" style={{ fontSize: '0.8125rem', padding: '0.5rem 0.75rem' }}>
+                  <span>{reviewError}</span>
+                </div>
+              )}
+
+              {reviewDecision !== 'ACCEPT' && (
+                <div className="form-group">
+                  <label className="form-label" htmlFor="review-remarks">
+                    {reviewDecision === 'REJECT' ? 'Rejection Reason *' : 'Correction Remarks *'}
+                  </label>
+                  <textarea
+                    id="review-remarks"
+                    className="search-input"
+                    style={{ padding: '0.5rem 0.75rem', minHeight: '80px' }}
+                    placeholder={
+                      reviewDecision === 'REJECT'
+                        ? 'Explain why this project cannot be approved...'
+                        : 'Detail the revisions required from the creator...'
+                    }
+                    value={reviewRemarks}
+                    onChange={(e) => setReviewRemarks(e.target.value)}
+                  />
+                </div>
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
+                <button
+                  type="button"
+                  className="btn-cancel"
+                  onClick={() => setIsReviewModalOpen(false)}
+                  disabled={isSubmittingReview}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  style={{
+                    backgroundColor:
+                      reviewDecision === 'ACCEPT'
+                        ? '#059669'
+                        : reviewDecision === 'REQUEST_CORRECTIONS'
+                        ? '#eab308'
+                        : '#dc2626',
+                    color: reviewDecision === 'REQUEST_CORRECTIONS' ? '#0f172a' : '#fff',
+                    border: 'none',
+                  }}
+                  onClick={handleConfirmReview}
+                  disabled={isSubmittingReview}
+                  id="btn-confirm-project-review"
+                >
+                  {isSubmittingReview
+                    ? 'Submitting...'
+                    : reviewDecision === 'ACCEPT'
+                    ? 'Confirm Acceptance'
+                    : reviewDecision === 'REQUEST_CORRECTIONS'
+                    ? 'Submit Correction Request'
+                    : 'Confirm Rejection'}
                 </button>
               </div>
             </div>

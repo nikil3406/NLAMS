@@ -110,6 +110,10 @@ export function ProjectsClient({
 
   const getStatusBadgeClass = (status: string) => {
     switch (status) {
+      case 'ACCEPTED':
+        return 'badge-status active';
+      case 'SUBMITTED':
+        return 'badge-status pending';
       case 'REGISTERED':
         return 'badge-status active';
       case 'DRAFT':
@@ -119,6 +123,7 @@ export function ProjectsClient({
       case 'COMPLETED':
         return 'badge-status active';
       case 'CANCELLED':
+      case 'REJECTED':
         return 'badge-status suspended';
       default:
         return 'badge-status inactive';

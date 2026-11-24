@@ -31,6 +31,9 @@ export type ProjectType = (typeof PROJECT_TYPES)[number];
 
 export const PROJECT_STATUSES = [
   'DRAFT',
+  'SUBMITTED',
+  'ACCEPTED',
+  'REJECTED',
   'REGISTERED',
   'ON_HOLD',
   'COMPLETED',

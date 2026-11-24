@@ -120,9 +120,9 @@ export class AcquisitionProposalService {
       );
     }
 
-    if (acqCase.project.status !== 'REGISTERED') {
+    if (acqCase.project.status !== 'REGISTERED' && acqCase.project.status !== 'ACCEPTED') {
       throw new BadRequestError(
-        `Cannot create acquisition proposal: linked project status is '${acqCase.project.status}'. Proposals can only be prepared for projects with 'REGISTERED' status.`
+        `Cannot create acquisition proposal: linked project status is '${acqCase.project.status}'. Proposals can only be prepared for accepted projects.`
       );
     }
 
@@ -919,7 +919,7 @@ export class AcquisitionProposalService {
     // Query cases from db that don't have a proposal yet
     // and have at least one approved inventory
     const conditions = [
-      eq(projects.status, 'REGISTERED'),
+      inArray(projects.status, ['ACCEPTED', 'REGISTERED']),
       isNull(acquisitionProposals.id),
     ];
     if (scopedUnitIds && scopedUnitIds.length > 0) {

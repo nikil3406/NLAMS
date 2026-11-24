@@ -633,7 +633,7 @@ export function AcquisitionCaseDetailsClient({
           }}
           id="awaiting-verification-banner"
         >
-          <strong>Field Verification Authorized:</strong> This case has been reviewed and permitted for field verification. Ground survey and field verification activities are now authorized to commence. (Note: Permission to conduct field verification is administrative and does not constitute statutory authorization to acquire land.)
+          <strong>Field Verification Active:</strong> Ground survey, parcel creation, and field verification activities are authorized to commence. Field Officers can immediately create parcel records for this case.
         </div>
       )}
 
