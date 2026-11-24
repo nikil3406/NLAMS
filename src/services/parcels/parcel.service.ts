@@ -299,8 +299,9 @@ export class ParcelService {
   }
 
   /**
-   * Updates permitted case-specific parcel details (proposedAffectedArea, affectedAreaUnit).
-   * Does NOT overwrite canonical parcel recorded total area.
+   * Updates permitted case-specific parcel details and physical land parcel attributes.
+   * Enforces that parcel is not locked (no submitted reports, not under review, not accepted).
+   * Validates that proposed affected area does not exceed total recorded parcel area.
    */
   async updateCaseParcel(
     caseId: string,
@@ -318,7 +319,7 @@ export class ParcelService {
     }
 
     // Submission and acceptance locking:
-    // Once submitted, parcel details cannot be modified by Field Officer.
+    // Once a report has been submitted, is under review, or accepted, parcel details cannot be modified.
     // Once accepted, the parcel is permanently locked. No SUPER_ADMIN override.
     if (existing.isAccepted) {
       throw new ConflictError(
@@ -326,36 +327,75 @@ export class ParcelService {
       );
     }
 
-    if (existing.isLocked) {
+    if (existing.isLocked || (existing.latestReportStatus && existing.latestReportStatus !== 'DRAFT')) {
       throw new ConflictError(
         'Cannot modify parcel details: a field verification report has already been submitted for this parcel'
       );
     }
+
+    const effectiveTotalArea =
+      input.totalArea !== undefined
+        ? input.totalArea
+        : Number(existing.parcel.totalArea);
+
+    const effectiveTotalUnit =
+      input.areaUnit !== undefined
+        ? input.areaUnit
+        : existing.parcel.areaUnit;
 
     const effectiveProposedArea =
       input.proposedAffectedArea !== undefined
         ? input.proposedAffectedArea
         : Number(existing.proposedAffectedArea);
 
-    const effectiveUnit =
+    const effectiveProposedUnit =
       input.affectedAreaUnit !== undefined
         ? input.affectedAreaUnit
         : existing.affectedAreaUnit;
 
-    // Validate proposed affected area against canonical recorded area
-    const totalSqm = convertAreaToSqm(Number(existing.parcel.totalArea), existing.parcel.areaUnit);
-    const proposedSqm = convertAreaToSqm(effectiveProposedArea, effectiveUnit);
+    // Validate proposed affected area against recorded total parcel area
+    const totalSqm = convertAreaToSqm(effectiveTotalArea, effectiveTotalUnit);
+    const proposedSqm = convertAreaToSqm(effectiveProposedArea, effectiveProposedUnit);
 
     if (proposedSqm > totalSqm + 1e-4) {
       throw new BadRequestError(
-        `Proposed affected area (${effectiveProposedArea} ${effectiveUnit}) cannot exceed the recorded total parcel area (${existing.parcel.totalArea} ${existing.parcel.areaUnit})`
+        `Proposed affected area (${effectiveProposedArea} ${effectiveProposedUnit}) cannot exceed the recorded total parcel area (${effectiveTotalArea} ${effectiveTotalUnit})`
       );
     }
+
+    const parcelData: {
+      state?: string;
+      district?: string;
+      taluk?: string;
+      village?: string;
+      surveyNumber?: string;
+      subdivisionNumber?: string | null;
+      landRecordReference?: string | null;
+      totalArea?: string;
+      areaUnit?: string;
+      landUse?: string | null;
+      physicalDescription?: string | null;
+      geometry?: unknown;
+    } = {};
+
+    if (input.state !== undefined) parcelData.state = input.state;
+    if (input.district !== undefined) parcelData.district = input.district;
+    if (input.taluk !== undefined) parcelData.taluk = input.taluk;
+    if (input.village !== undefined) parcelData.village = input.village;
+    if (input.surveyNumber !== undefined) parcelData.surveyNumber = input.surveyNumber;
+    if (input.subdivisionNumber !== undefined) parcelData.subdivisionNumber = input.subdivisionNumber;
+    if (input.landRecordReference !== undefined) parcelData.landRecordReference = input.landRecordReference;
+    if (input.totalArea !== undefined) parcelData.totalArea = String(input.totalArea);
+    if (input.areaUnit !== undefined) parcelData.areaUnit = input.areaUnit;
+    if (input.landUse !== undefined) parcelData.landUse = input.landUse;
+    if (input.physicalDescription !== undefined) parcelData.physicalDescription = input.physicalDescription;
+    if (input.geometry !== undefined) parcelData.geometry = input.geometry;
 
     await parcelRepository.updateCaseParcel(caseParcelId, {
       proposedAffectedArea:
         input.proposedAffectedArea !== undefined ? String(input.proposedAffectedArea) : undefined,
       affectedAreaUnit: input.affectedAreaUnit,
+      parcelData: Object.keys(parcelData).length > 0 ? parcelData : undefined,
     });
 
     const updated = await parcelRepository.findCaseParcelById(caseParcelId);

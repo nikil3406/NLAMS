@@ -355,7 +355,12 @@ export function ParcelsSection({
               <tbody>
                 {filteredParcels.map((item, idx) => {
                   const { parcel } = item;
-                  const isParcelLocked = Boolean(item.isLocked || item.isAccepted);
+                  const isReportSubmittedOrUnderReview = Boolean(
+                    item.latestReportStatus && item.latestReportStatus !== 'DRAFT'
+                  );
+                  const isParcelLocked = Boolean(
+                    item.isLocked || item.isAccepted || isReportSubmittedOrUnderReview
+                  );
                   const canEditParcel = canAddOrEdit && !isParcelLocked;
                   return (
                     <tr
@@ -527,7 +532,12 @@ export function ParcelsSection({
           userRoles={userRoles}
           isSuperAdmin={isSuperAdmin}
           isVerifiedLandOfficer={isVerifiedLandOfficer}
-          canEdit={canAddOrEdit && !viewingParcel.isLocked && !viewingParcel.isAccepted}
+          canEdit={
+            canAddOrEdit &&
+            !viewingParcel.isLocked &&
+            !viewingParcel.isAccepted &&
+            (!viewingParcel.latestReportStatus || viewingParcel.latestReportStatus === 'DRAFT')
+          }
           onClose={() => setViewingParcel(null)}
           onOpenEdit={() => {
             const current = viewingParcel;

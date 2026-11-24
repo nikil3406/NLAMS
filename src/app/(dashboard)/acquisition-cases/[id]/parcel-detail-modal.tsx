@@ -110,23 +110,41 @@ export function ParcelDetailModal({
             </span>
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: '#94a3b8',
-              fontSize: '1.25rem',
-              cursor: 'pointer',
-              lineHeight: 1,
-              padding: '0.25rem',
-            }}
-            aria-label="Close modal"
-            id="close-parcel-detail-btn"
-          >
-            ✕
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            {canEdit && onOpenEdit && (
+              <button
+                type="button"
+                onClick={onOpenEdit}
+                className="btn-secondary"
+                style={{
+                  padding: '0.35rem 0.75rem',
+                  fontSize: '0.8125rem',
+                  borderColor: 'rgba(59, 130, 246, 0.4)',
+                  color: '#60a5fa',
+                }}
+                id="detail-modal-edit-parcel-btn"
+              >
+                ✎ Edit Parcel
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: '#94a3b8',
+                fontSize: '1.25rem',
+                cursor: 'pointer',
+                lineHeight: 1,
+                padding: '0.25rem',
+              }}
+              aria-label="Close modal"
+              id="close-parcel-detail-btn"
+            >
+              ✕
+            </button>
+          </div>
         </div>
 
         {/* Content */}

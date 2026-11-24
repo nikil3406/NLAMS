@@ -150,17 +150,75 @@ export function parseAddParcelInput(body: unknown): CreateAndAssociateParcelInpu
  */
 export const updateCaseParcelSchema = z
   .object({
+    state: z
+      .string()
+      .trim()
+      .min(1, { message: 'State is required' })
+      .max(100, { message: 'State must not exceed 100 characters' })
+      .optional(),
+    district: z
+      .string()
+      .trim()
+      .min(1, { message: 'District is required' })
+      .max(100, { message: 'District must not exceed 100 characters' })
+      .optional(),
+    taluk: z
+      .string()
+      .trim()
+      .min(1, { message: 'Taluk is required' })
+      .max(100, { message: 'Taluk must not exceed 100 characters' })
+      .optional(),
+    village: z
+      .string()
+      .trim()
+      .min(1, { message: 'Village is required' })
+      .max(100, { message: 'Village must not exceed 100 characters' })
+      .optional(),
+    surveyNumber: z
+      .string()
+      .trim()
+      .min(1, { message: 'Survey number is required' })
+      .max(100, { message: 'Survey number must not exceed 100 characters' })
+      .optional(),
+    subdivisionNumber: z
+      .string()
+      .trim()
+      .max(100, { message: 'Subdivision number must not exceed 100 characters' })
+      .optional()
+      .nullable(),
+    landRecordReference: z
+      .string()
+      .trim()
+      .max(255, { message: 'Land record reference must not exceed 255 characters' })
+      .optional()
+      .nullable(),
+    totalArea: z.coerce
+      .number()
+      .positive({ message: 'Total parcel area must be a positive number' })
+      .optional(),
+    areaUnit: parcelAreaUnitSchema.optional(),
     proposedAffectedArea: z.coerce
       .number()
       .positive({ message: 'Proposed affected area must be a positive number' })
       .optional(),
     affectedAreaUnit: parcelAreaUnitSchema.optional(),
+    landUse: z
+      .string()
+      .trim()
+      .max(100, { message: 'Land use must not exceed 100 characters' })
+      .optional()
+      .nullable(),
+    physicalDescription: z
+      .string()
+      .trim()
+      .max(2000, { message: 'Physical description must not exceed 2000 characters' })
+      .optional()
+      .nullable(),
+    geometry: geoJsonGeometrySchema.optional().nullable(),
     // Strictly forbidden fields
     id: z.never({ invalid_type_error: 'Case parcel ID cannot be modified' }).optional(),
     caseId: z.never({ invalid_type_error: 'Case ID cannot be modified' }).optional(),
-    parcelId: z.never({ invalid_type_error: 'Parcel ID cannot be modified' }).optional(),
-    totalArea: z.never({ invalid_type_error: 'Recorded total area cannot be overwritten by case update' }).optional(),
-    areaUnit: z.never({ invalid_type_error: 'Recorded area unit cannot be modified by case update' }).optional(),
+    parcelId: z.never({ invalid_type_error: 'Parcel ID is immutable and cannot be modified' }).optional(),
     createdBy: z.never({ invalid_type_error: 'Creator cannot be modified' }).optional(),
     updatedBy: z.never({ invalid_type_error: 'Updater cannot be supplied by client' }).optional(),
     createdAt: z.never({ invalid_type_error: 'Creation timestamp cannot be modified' }).optional(),
@@ -168,9 +226,14 @@ export const updateCaseParcelSchema = z
     status: z.never({ invalid_type_error: 'Status cannot be supplied by client' }).optional(),
   })
   .refine(
-    (data) => data.proposedAffectedArea !== undefined || data.affectedAreaUnit !== undefined,
+    (data) => {
+      const keys = Object.keys(data).filter(
+        (k) => data[k as keyof typeof data] !== undefined
+      );
+      return keys.length > 0;
+    },
     {
-      message: 'At least one field (proposedAffectedArea or affectedAreaUnit) must be provided for update',
+      message: 'At least one field must be provided for update',
     }
   );
 

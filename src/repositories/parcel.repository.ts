@@ -503,13 +503,28 @@ export class ParcelRepository {
   }
 
   /**
-   * Updates case-specific details of a parcel association (proposedAffectedArea, affectedAreaUnit).
+   * Updates case-specific details of a parcel association (proposedAffectedArea, affectedAreaUnit)
+   * and any editable canonical physical land parcel details.
    */
   async updateCaseParcel(
     id: string,
     data: {
       proposedAffectedArea?: string;
       affectedAreaUnit?: string;
+      parcelData?: {
+        state?: string;
+        district?: string;
+        taluk?: string;
+        village?: string;
+        surveyNumber?: string;
+        subdivisionNumber?: string | null;
+        landRecordReference?: string | null;
+        totalArea?: string;
+        areaUnit?: string;
+        landUse?: string | null;
+        physicalDescription?: string | null;
+        geometry?: unknown;
+      };
     },
     txClient?: TransactionClient
   ): Promise<AcquisitionCaseParcel> {
@@ -519,6 +534,7 @@ export class ParcelRepository {
     // Reject update if parcel is accepted or has submitted reports
     const [statusRow] = await executor.execute(sql`
       SELECT
+        acp.parcel_id AS "parcelId",
         EXISTS (
           SELECT 1 FROM field_verification_reports fvr
           WHERE fvr.case_parcel_id = ${id}::uuid AND fvr.status = 'ACCEPTED'
@@ -527,6 +543,9 @@ export class ParcelRepository {
           SELECT 1 FROM field_verification_reports fvr
           WHERE fvr.case_parcel_id = ${id}::uuid AND fvr.status != 'DRAFT'
         ) AS "isLocked"
+      FROM acquisition_case_parcels acp
+      WHERE acp.id = ${id}::uuid
+      LIMIT 1
     `);
 
     if (statusRow?.isAccepted) {
@@ -539,6 +558,30 @@ export class ParcelRepository {
       throw new ConflictError(
         'Cannot update parcel: a field verification report has already been submitted for this parcel'
       );
+    }
+
+    // Update physical land parcel fields if provided
+    if (data.parcelData && statusRow?.parcelId) {
+      const lpUpdate: Record<string, unknown> = {
+        updatedAt: new Date(),
+      };
+      if (data.parcelData.state !== undefined) lpUpdate.state = data.parcelData.state;
+      if (data.parcelData.district !== undefined) lpUpdate.district = data.parcelData.district;
+      if (data.parcelData.taluk !== undefined) lpUpdate.taluk = data.parcelData.taluk;
+      if (data.parcelData.village !== undefined) lpUpdate.village = data.parcelData.village;
+      if (data.parcelData.surveyNumber !== undefined) lpUpdate.surveyNumber = data.parcelData.surveyNumber;
+      if (data.parcelData.subdivisionNumber !== undefined) lpUpdate.subdivisionNumber = data.parcelData.subdivisionNumber;
+      if (data.parcelData.landRecordReference !== undefined) lpUpdate.landRecordReference = data.parcelData.landRecordReference;
+      if (data.parcelData.totalArea !== undefined) lpUpdate.totalArea = data.parcelData.totalArea;
+      if (data.parcelData.areaUnit !== undefined) lpUpdate.areaUnit = data.parcelData.areaUnit;
+      if (data.parcelData.landUse !== undefined) lpUpdate.landUse = data.parcelData.landUse;
+      if (data.parcelData.physicalDescription !== undefined) lpUpdate.physicalDescription = data.parcelData.physicalDescription;
+      if (data.parcelData.geometry !== undefined) lpUpdate.geometry = data.parcelData.geometry;
+
+      await executor
+        .update(landParcels)
+        .set(lpUpdate)
+        .where(eq(landParcels.id, String(statusRow.parcelId)));
     }
 
     const updateData: Partial<NewAcquisitionCaseParcel> & { updatedAt: Date } = {

@@ -8,8 +8,42 @@ interface ParcelEntryModalProps {
   caseId: string;
   defaultState?: string;
   defaultDistrict?: string;
+  item?: CaseParcelWithDetails | null;
   onClose: () => void;
-  onSuccess: (newParcel: CaseParcelWithDetails) => void;
+  onSuccess: (updated: CaseParcelWithDetails) => void;
+}
+
+function parseDescription(desc: string | null | undefined) {
+  if (!desc) return {};
+  const result: {
+    structures?: string;
+    treesCrops?: string;
+    access?: string;
+    lat?: string;
+    lng?: string;
+    sketchRef?: string;
+    notes?: string;
+  } = {};
+  const parts = desc.split(' | ');
+  for (const part of parts) {
+    if (part.startsWith('Structures: ')) result.structures = part.replace('Structures: ', '');
+    else if (part.startsWith('Trees/Crops: ')) result.treesCrops = part.replace('Trees/Crops: ', '');
+    else if (part.startsWith('Access & Boundary: ')) result.access = part.replace('Access & Boundary: ', '');
+    else if (part.startsWith('Coordinates: Lat ')) {
+      const m = part.match(/Coordinates: Lat (.*?)°, Long (.*?)°/);
+      if (m) {
+        result.lat = m[1];
+        result.lng = m[2];
+      }
+    } else if (part.startsWith('Survey Sketch Ref: ')) {
+      result.sketchRef = part.replace('Survey Sketch Ref: ', '');
+    } else if (part.startsWith('Notes: ')) {
+      result.notes = part.replace('Notes: ', '');
+    } else {
+      result.notes = result.notes ? `${result.notes} | ${part}` : part;
+    }
+  }
+  return result;
 }
 
 const AREA_UNITS = [
@@ -37,9 +71,13 @@ export function ParcelEntryModal({
   caseId,
   defaultState = 'Karnataka',
   defaultDistrict = '',
+  item,
   onClose,
   onSuccess,
 }: ParcelEntryModalProps) {
+  const isEditMode = Boolean(item);
+  const parsedDesc = item ? parseDescription(item.parcel.physicalDescription) : {};
+
   // Mode toggle: New canonical parcel vs Link existing
   const [entryMode, setEntryMode] = useState<'NEW' | 'EXISTING'>('NEW');
 
@@ -47,32 +85,32 @@ export function ParcelEntryModal({
   const [existingParcelId, setExistingParcelId] = useState('');
 
   // Section A: Land identification
-  const [stateName, setStateName] = useState(defaultState);
-  const [district, setDistrict] = useState(defaultDistrict);
-  const [taluk, setTaluk] = useState('');
-  const [village, setVillage] = useState('');
-  const [surveyNumber, setSurveyNumber] = useState('');
-  const [subdivisionNumber, setSubdivisionNumber] = useState('');
-  const [landRecordReference, setLandRecordReference] = useState('');
-  const [customParcelId, setCustomParcelId] = useState('');
+  const [stateName, setStateName] = useState(item ? item.parcel.state : defaultState);
+  const [district, setDistrict] = useState(item ? item.parcel.district : defaultDistrict);
+  const [taluk, setTaluk] = useState(item ? item.parcel.taluk : '');
+  const [village, setVillage] = useState(item ? item.parcel.village : '');
+  const [surveyNumber, setSurveyNumber] = useState(item ? item.parcel.surveyNumber : '');
+  const [subdivisionNumber, setSubdivisionNumber] = useState(item?.parcel.subdivisionNumber ?? '');
+  const [landRecordReference, setLandRecordReference] = useState(item?.parcel.landRecordReference ?? '');
+  const [customParcelId, setCustomParcelId] = useState(item ? item.parcel.parcelId : '');
 
   // Section B: Area details
-  const [totalArea, setTotalArea] = useState('');
-  const [areaUnit, setAreaUnit] = useState('SQ_M');
-  const [proposedAffectedArea, setProposedAffectedArea] = useState('');
-  const [affectedAreaUnit, setAffectedAreaUnit] = useState('SQ_M');
+  const [totalArea, setTotalArea] = useState(item ? String(item.parcel.totalArea) : '');
+  const [areaUnit, setAreaUnit] = useState(item ? item.parcel.areaUnit : 'SQ_M');
+  const [proposedAffectedArea, setProposedAffectedArea] = useState(item ? String(item.proposedAffectedArea) : '');
+  const [affectedAreaUnit, setAffectedAreaUnit] = useState(item ? item.affectedAreaUnit : 'SQ_M');
 
   // Section C: Physical land details
-  const [landUse, setLandUse] = useState('Agricultural (Dry Land)');
-  const [structuresPresent, setStructuresPresent] = useState('');
-  const [treesCropsPresent, setTreesCropsPresent] = useState('');
-  const [accessObservations, setAccessObservations] = useState('');
-  const [physicalNotes, setPhysicalNotes] = useState('');
+  const [landUse, setLandUse] = useState(item?.parcel.landUse ?? 'Agricultural (Dry Land)');
+  const [structuresPresent, setStructuresPresent] = useState(parsedDesc.structures ?? '');
+  const [treesCropsPresent, setTreesCropsPresent] = useState(parsedDesc.treesCrops ?? '');
+  const [accessObservations, setAccessObservations] = useState(parsedDesc.access ?? '');
+  const [physicalNotes, setPhysicalNotes] = useState(parsedDesc.notes ?? '');
 
   // Section D: Location and spatial references
-  const [latitude, setLatitude] = useState('');
-  const [longitude, setLongitude] = useState('');
-  const [surveySketchRef, setSurveySketchRef] = useState('');
+  const [latitude, setLatitude] = useState(parsedDesc.lat ?? '');
+  const [longitude, setLongitude] = useState(parsedDesc.lng ?? '');
+  const [surveySketchRef, setSurveySketchRef] = useState(parsedDesc.sketchRef ?? '');
 
   // Form submission state
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -82,7 +120,7 @@ export function ParcelEntryModal({
   const totalSqm = convertAreaToSqm(Number(totalArea), areaUnit);
   const proposedSqm = convertAreaToSqm(Number(proposedAffectedArea), affectedAreaUnit);
   const isAreaExceeded =
-    entryMode === 'NEW' &&
+    (entryMode === 'NEW' || isEditMode) &&
     !isNaN(totalSqm) &&
     !isNaN(proposedSqm) &&
     Number(totalArea) > 0 &&
@@ -96,6 +134,104 @@ export function ParcelEntryModal({
     const parsedProposed = parseFloat(proposedAffectedArea);
     if (isNaN(parsedProposed) || parsedProposed <= 0) {
       setErrorMessage('Proposed affected area must be a positive number');
+      return;
+    }
+
+    if (isEditMode) {
+      if (!stateName.trim()) {
+        setErrorMessage('State is required');
+        return;
+      }
+      if (!district.trim()) {
+        setErrorMessage('District is required');
+        return;
+      }
+      if (!taluk.trim()) {
+        setErrorMessage('Taluk is required');
+        return;
+      }
+      if (!village.trim()) {
+        setErrorMessage('Village is required');
+        return;
+      }
+      if (!surveyNumber.trim()) {
+        setErrorMessage('Survey number is required');
+        return;
+      }
+
+      const parsedTotal = parseFloat(totalArea);
+      if (isNaN(parsedTotal) || parsedTotal <= 0) {
+        setErrorMessage('Total parcel area must be a positive number');
+        return;
+      }
+
+      if (isAreaExceeded) {
+        setErrorMessage(
+          `Proposed affected area (${proposedAffectedArea} ${affectedAreaUnit}) cannot exceed the recorded total parcel area (${totalArea} ${areaUnit})`
+        );
+        return;
+      }
+
+      // Compile physical description
+      const descParts: string[] = [];
+      if (structuresPresent.trim()) {
+        descParts.push(`Structures: ${structuresPresent.trim()}`);
+      }
+      if (treesCropsPresent.trim()) {
+        descParts.push(`Trees/Crops: ${treesCropsPresent.trim()}`);
+      }
+      if (accessObservations.trim()) {
+        descParts.push(`Access & Boundary: ${accessObservations.trim()}`);
+      }
+      if (latitude.trim() && longitude.trim()) {
+        descParts.push(`Coordinates: Lat ${latitude.trim()}°, Long ${longitude.trim()}°`);
+      }
+      if (surveySketchRef.trim()) {
+        descParts.push(`Survey Sketch Ref: ${surveySketchRef.trim()}`);
+      }
+      if (physicalNotes.trim()) {
+        descParts.push(`Notes: ${physicalNotes.trim()}`);
+      }
+
+      const fullDescription = descParts.length > 0 ? descParts.join(' | ') : null;
+
+      setIsSubmitting(true);
+      try {
+        const payload: Record<string, unknown> = {
+          state: stateName.trim(),
+          district: district.trim(),
+          taluk: taluk.trim(),
+          village: village.trim(),
+          surveyNumber: surveyNumber.trim(),
+          subdivisionNumber: subdivisionNumber.trim() || null,
+          landRecordReference: landRecordReference.trim() || null,
+          totalArea: parsedTotal,
+          areaUnit,
+          proposedAffectedArea: parsedProposed,
+          affectedAreaUnit,
+          landUse: landUse || null,
+          physicalDescription: fullDescription,
+        };
+
+        const res = await fetch(`/api/acquisition-cases/${caseId}/parcels/${item!.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+
+        const json = await res.json();
+        if (!res.ok || !json.success) {
+          throw new Error(json.error || 'Failed to update parcel');
+        }
+
+        onSuccess(json.data);
+      } catch (err: unknown) {
+        setErrorMessage(
+          err instanceof Error ? err.message : 'An error occurred updating the parcel'
+        );
+      } finally {
+        setIsSubmitting(false);
+      }
       return;
     }
 
@@ -277,10 +413,12 @@ export function ParcelEntryModal({
         >
           <div>
             <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: '#fff', margin: 0 }}>
-              Add Land Parcel Entry
+              {isEditMode ? `Edit Land Parcel — ${item!.parcel.parcelId}` : 'Add Land Parcel Entry'}
             </h3>
             <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.8125rem', color: '#94a3b8' }}>
-              Field verification parcel identification and proposed affected area entry
+              {isEditMode
+                ? 'Update recorded land attributes, survey numbers, and affected area demarcation'
+                : 'Field verification parcel identification and proposed affected area entry'}
             </p>
           </div>
           <button
@@ -300,54 +438,81 @@ export function ParcelEntryModal({
           </button>
         </div>
 
-        {/* Mode Selector Toggle */}
-        <div
-          style={{
-            display: 'flex',
-            background: '#0f172a',
-            padding: '0.375rem 1.5rem',
-            borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
-            gap: '0.5rem',
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => { setEntryMode('NEW'); setErrorMessage(null); }}
+        {/* Mode Selector Toggle (Creation only) */}
+        {!isEditMode && (
+          <div
             style={{
-              background: entryMode === 'NEW' ? '#1e293b' : 'transparent',
-              border: entryMode === 'NEW' ? '1px solid rgba(59, 130, 246, 0.4)' : '1px solid transparent',
-              color: entryMode === 'NEW' ? '#60a5fa' : '#94a3b8',
-              borderRadius: '6px',
-              padding: '0.4rem 0.85rem',
-              fontSize: '0.8125rem',
-              fontWeight: 500,
-              cursor: 'pointer',
+              display: 'flex',
+              background: '#0f172a',
+              padding: '0.375rem 1.5rem',
+              borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+              gap: '0.5rem',
             }}
-            id="tab-new-parcel-mode"
           >
-            ✦ Create New Parcel Entry
-          </button>
-          <button
-            type="button"
-            onClick={() => { setEntryMode('EXISTING'); setErrorMessage(null); }}
-            style={{
-              background: entryMode === 'EXISTING' ? '#1e293b' : 'transparent',
-              border: entryMode === 'EXISTING' ? '1px solid rgba(59, 130, 246, 0.4)' : '1px solid transparent',
-              color: entryMode === 'EXISTING' ? '#60a5fa' : '#94a3b8',
-              borderRadius: '6px',
-              padding: '0.4rem 0.85rem',
-              fontSize: '0.8125rem',
-              fontWeight: 500,
-              cursor: 'pointer',
-            }}
-            id="tab-existing-parcel-mode"
-          >
-            🔗 Link Existing Registered Parcel
-          </button>
-        </div>
+            <button
+              type="button"
+              onClick={() => { setEntryMode('NEW'); setErrorMessage(null); }}
+              style={{
+                background: entryMode === 'NEW' ? '#1e293b' : 'transparent',
+                border: entryMode === 'NEW' ? '1px solid rgba(59, 130, 246, 0.4)' : '1px solid transparent',
+                color: entryMode === 'NEW' ? '#60a5fa' : '#94a3b8',
+                borderRadius: '6px',
+                padding: '0.4rem 0.85rem',
+                fontSize: '0.8125rem',
+                fontWeight: 500,
+                cursor: 'pointer',
+              }}
+              id="tab-new-parcel-mode"
+            >
+              ✦ Create New Parcel Entry
+            </button>
+            <button
+              type="button"
+              onClick={() => { setEntryMode('EXISTING'); setErrorMessage(null); }}
+              style={{
+                background: entryMode === 'EXISTING' ? '#1e293b' : 'transparent',
+                border: entryMode === 'EXISTING' ? '1px solid rgba(59, 130, 246, 0.4)' : '1px solid transparent',
+                color: entryMode === 'EXISTING' ? '#60a5fa' : '#94a3b8',
+                borderRadius: '6px',
+                padding: '0.4rem 0.85rem',
+                fontSize: '0.8125rem',
+                fontWeight: 500,
+                cursor: 'pointer',
+              }}
+              id="tab-existing-parcel-mode"
+            >
+              🔗 Link Existing Registered Parcel
+            </button>
+          </div>
+        )}
 
         {/* Scrollable Form Body */}
         <form onSubmit={handleSubmit} style={{ overflowY: 'auto', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+          {isEditMode && (
+            <div
+              style={{
+                background: 'rgba(59, 130, 246, 0.08)',
+                border: '1px solid rgba(59, 130, 246, 0.25)',
+                borderRadius: '8px',
+                padding: '0.75rem 1rem',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
+              <div>
+                <div style={{ fontSize: '0.6875rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Canonical Parcel ID
+                </div>
+                <div style={{ fontSize: '0.9375rem', fontWeight: 600, color: '#60a5fa', fontFamily: 'monospace' }}>
+                  {item!.parcel.parcelId}
+                </div>
+              </div>
+              <span style={{ fontSize: '0.6875rem', background: 'rgba(59, 130, 246, 0.2)', color: '#93c5fd', padding: '0.2rem 0.5rem', borderRadius: '4px' }}>
+                Immutable Identity
+              </span>
+            </div>
+          )}
           {errorMessage && (
             <div
               style={{
@@ -577,7 +742,7 @@ export function ParcelEntryModal({
                   </div>
                   <div>
                     <label htmlFor="parcel-custom-id" style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#cbd5e1', marginBottom: '0.25rem' }}>
-                      Parcel ID (Auto-generated if blank)
+                      {isEditMode ? 'Parcel ID (Immutable)' : 'Parcel ID (Auto-generated if blank)'}
                     </label>
                     <input
                       id="parcel-custom-id"
@@ -585,9 +750,15 @@ export function ParcelEntryModal({
                       placeholder="Auto: NLAMS-PRC-XXXXXX"
                       value={customParcelId}
                       onChange={(e) => setCustomParcelId(e.target.value)}
-                      disabled={isSubmitting}
+                      disabled={isSubmitting || isEditMode}
                       className="users-search-input"
-                      style={{ width: '100%', height: '36px', fontFamily: 'monospace' }}
+                      style={{
+                        width: '100%',
+                        height: '36px',
+                        fontFamily: 'monospace',
+                        opacity: isEditMode ? 0.6 : 1,
+                        cursor: isEditMode ? 'not-allowed' : 'text',
+                      }}
                     />
                   </div>
                 </div>
@@ -896,11 +1067,19 @@ export function ParcelEntryModal({
             </button>
             <button
               type="submit"
-              disabled={isSubmitting || (entryMode === 'NEW' && isAreaExceeded)}
+              disabled={isSubmitting || ((entryMode === 'NEW' || isEditMode) && isAreaExceeded)}
               className="btn-primary"
               id="submit-parcel-btn"
             >
-              {isSubmitting ? 'Saving Parcel...' : entryMode === 'NEW' ? '✓ Save Land Parcel' : '🔗 Link Parcel'}
+              {isSubmitting
+                ? isEditMode
+                  ? 'Saving Changes...'
+                  : 'Saving Parcel...'
+                : isEditMode
+                ? '✓ Save Parcel Changes'
+                : entryMode === 'NEW'
+                ? '✓ Save Land Parcel'
+                : '🔗 Link Parcel'}
             </button>
           </div>
         </form>
