@@ -37,7 +37,7 @@ import { passwordService } from '../../src/services/auth/password.service';
 import { authConfig } from '../../src/config/auth';
 
 // Route Handlers
-import { POST as projectsPostHandler } from '../../src/app/api/projects/route';
+import { GET as projectsGetHandler, POST as projectsPostHandler } from '../../src/app/api/projects/route';
 import { PATCH as projectDetailPatchHandler } from '../../src/app/api/projects/[id]/route';
 import { POST as projectRegisterHandler } from '../../src/app/api/projects/[id]/register/route';
 import { POST as projectResubmitHandler } from '../../src/app/api/projects/[id]/resubmit/route';
@@ -440,6 +440,44 @@ describe('NLAMS-02 — Relocate Project Approval and Remove Acquisition Case App
     activeCaseId = json.data.id;
     createdCaseIds.push(activeCaseId);
     assert.equal(json.data.createdBy, landOfficerId);
+  });
+
+  it('3c. Projects with existing acquisition cases are excluded when querying with hasAcquisitionCase=false', async () => {
+    // projOfficerProjectId now has an acquisition case, whereas ministryCreatedProjectId does not
+    const reqWithoutCases = new NextRequest('http://localhost:3000/api/projects?hasAcquisitionCase=false&limit=100', {
+      headers: { cookie: landOfficerCookie },
+    });
+    const resWithoutCases = await projectsGetHandler(reqWithoutCases);
+    assert.equal(resWithoutCases.status, 200);
+    const jsonWithout = await resWithoutCases.json();
+    const idsWithout = jsonWithout.data.map((p: { id: string }) => p.id);
+
+    assert.ok(
+      !idsWithout.includes(projOfficerProjectId),
+      'Project with existing acquisition case must be excluded from hasAcquisitionCase=false query'
+    );
+    assert.ok(
+      idsWithout.includes(ministryCreatedProjectId),
+      'Project without acquisition case must be included in hasAcquisitionCase=false query'
+    );
+
+    // Query with hasAcquisitionCase=true should include projOfficerProjectId
+    const reqWithCases = new NextRequest('http://localhost:3000/api/projects?hasAcquisitionCase=true&limit=100', {
+      headers: { cookie: landOfficerCookie },
+    });
+    const resWithCases = await projectsGetHandler(reqWithCases);
+    assert.equal(resWithCases.status, 200);
+    const jsonWith = await resWithCases.json();
+    const idsWith = jsonWith.data.map((p: { id: string }) => p.id);
+
+    assert.ok(
+      idsWith.includes(projOfficerProjectId),
+      'Project with existing acquisition case must be included in hasAcquisitionCase=true query'
+    );
+    assert.ok(
+      !idsWith.includes(ministryCreatedProjectId),
+      'Project without acquisition case must be excluded from hasAcquisitionCase=true query'
+    );
   });
 
   // ──────────────────────────────────────────────────────────────────────────────

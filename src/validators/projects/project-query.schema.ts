@@ -16,6 +16,13 @@ export const projectQuerySchema = z.object({
       return undefined;
     }, z.boolean().optional())
     .optional(),
+  hasAcquisitionCase: z
+    .preprocess((val) => {
+      if (val === 'true' || val === true) return true;
+      if (val === 'false' || val === false) return false;
+      return undefined;
+    }, z.boolean().optional())
+    .optional(),
 });
 
 export type ProjectQueryInput = z.infer<typeof projectQuerySchema>;

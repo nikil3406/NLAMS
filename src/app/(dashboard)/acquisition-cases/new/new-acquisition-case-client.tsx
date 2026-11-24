@@ -30,26 +30,42 @@ export function NewAcquisitionCaseClient({}: NewAcquisitionCaseClientProps) {
       setIsLoadingProjects(true);
       setLoadError(null);
       try {
-        // Query projects eligible for acquisition case creation: ACCEPTED or REGISTERED, without pending corrections
-        const [resAccepted, resRegistered] = await Promise.all([
-          fetch('/api/projects?status=ACCEPTED&limit=100'),
-          fetch('/api/projects?status=REGISTERED&limit=100'),
+        // Query projects eligible for acquisition case creation: ACCEPTED or REGISTERED,
+        // without pending corrections, and without existing acquisition cases.
+        const [resAccepted, resRegistered, resExistingCases] = await Promise.all([
+          fetch('/api/projects?status=ACCEPTED&hasAcquisitionCase=false&limit=100'),
+          fetch('/api/projects?status=REGISTERED&hasAcquisitionCase=false&limit=100'),
+          fetch('/api/acquisition-cases?limit=100'),
         ]);
 
-        const [jsonAccepted, jsonRegistered] = await Promise.all([
+        const [jsonAccepted, jsonRegistered, jsonExistingCases] = await Promise.all([
           resAccepted.ok ? resAccepted.json() : { success: false, data: [] },
           resRegistered.ok ? resRegistered.json() : { success: false, data: [] },
+          resExistingCases.ok ? resExistingCases.json() : { success: false, data: [] },
         ]);
+
+        // Track projects that already have an acquisition case
+        const existingCaseProjectIds = new Set<string>();
+        if (jsonExistingCases.success && Array.isArray(jsonExistingCases.data)) {
+          for (const ac of jsonExistingCases.data) {
+            if (ac.projectId) existingCaseProjectIds.add(ac.projectId);
+            if (ac.project?.id) existingCaseProjectIds.add(ac.project.id);
+          }
+        }
 
         const combinedMap = new Map<string, ProjectWithRelations>();
         if (jsonAccepted.success && Array.isArray(jsonAccepted.data)) {
           for (const p of jsonAccepted.data as ProjectWithRelations[]) {
-            if (!p.correctionPendingFor) combinedMap.set(p.id, p);
+            if (!p.correctionPendingFor && !existingCaseProjectIds.has(p.id)) {
+              combinedMap.set(p.id, p);
+            }
           }
         }
         if (jsonRegistered.success && Array.isArray(jsonRegistered.data)) {
           for (const p of jsonRegistered.data as ProjectWithRelations[]) {
-            if (!p.correctionPendingFor && !combinedMap.has(p.id)) combinedMap.set(p.id, p);
+            if (!p.correctionPendingFor && !existingCaseProjectIds.has(p.id) && !combinedMap.has(p.id)) {
+              combinedMap.set(p.id, p);
+            }
           }
         }
 

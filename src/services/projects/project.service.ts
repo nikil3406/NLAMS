@@ -194,6 +194,7 @@ export class ProjectService {
       implementingAgencyId: query.implementingAgencyId,
       administrativeUnitIds: allowedUnitIds,
       landAcquisitionRequired: query.landAcquisitionRequired,
+      hasAcquisitionCase: query.hasAcquisitionCase,
       limit,
       offset,
     };

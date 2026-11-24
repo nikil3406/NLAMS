@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm';
+import { and, desc, eq, exists, ilike, inArray, notExists, or, sql } from 'drizzle-orm';
 import { db } from '../../db';
 import {
   projects,
@@ -7,6 +7,7 @@ import {
   type ProjectStatus,
   type ProjectType,
 } from '../../db/schema/projects';
+import { acquisitionCases } from '../../db/schema/acquisition-cases';
 import { implementingAgencies, type ImplementingAgency } from '../../db/schema/implementing-agencies';
 import { administrativeUnits, type AdministrativeUnit } from '../../db/schema/administrative-units';
 import { users } from '../../db/schema/users';
@@ -26,6 +27,7 @@ export interface ProjectFilterOptions {
   implementingAgencyId?: string;
   administrativeUnitIds?: string[]; // Allowed admin unit IDs from user scope
   landAcquisitionRequired?: boolean;
+  hasAcquisitionCase?: boolean;
   limit?: number;
   offset?: number;
 }
@@ -199,6 +201,21 @@ export class ProjectRepository {
       conditions.push(eq(projects.landAcquisitionRequired, options.landAcquisitionRequired));
     }
 
+    if (typeof options.hasAcquisitionCase === 'boolean') {
+      const caseExistsQuery = exists(
+        db
+          .select({ one: sql`1` })
+          .from(acquisitionCases)
+          .where(eq(acquisitionCases.projectId, projects.id))
+      );
+      conditions.push(options.hasAcquisitionCase ? caseExistsQuery : notExists(
+        db
+          .select({ one: sql`1` })
+          .from(acquisitionCases)
+          .where(eq(acquisitionCases.projectId, projects.id))
+      ));
+    }
+
     if (options.search?.trim()) {
       const term = `%${options.search.trim()}%`;
       conditions.push(
@@ -278,6 +295,21 @@ export class ProjectRepository {
 
     if (typeof options.landAcquisitionRequired === 'boolean') {
       conditions.push(eq(projects.landAcquisitionRequired, options.landAcquisitionRequired));
+    }
+
+    if (typeof options.hasAcquisitionCase === 'boolean') {
+      const caseExistsQuery = exists(
+        db
+          .select({ one: sql`1` })
+          .from(acquisitionCases)
+          .where(eq(acquisitionCases.projectId, projects.id))
+      );
+      conditions.push(options.hasAcquisitionCase ? caseExistsQuery : notExists(
+        db
+          .select({ one: sql`1` })
+          .from(acquisitionCases)
+          .where(eq(acquisitionCases.projectId, projects.id))
+      ));
     }
 
     if (options.search?.trim()) {
