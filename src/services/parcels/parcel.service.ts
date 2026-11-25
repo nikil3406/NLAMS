@@ -101,6 +101,23 @@ export class ParcelService {
   }
 
   /**
+   * Determines whether Land Officer parcel visibility restriction applies.
+   * Land Officers (who are not also Field Officers or Super Admins) can only see
+   * parcels that have at least one associated Field Officer report.
+   */
+  private async shouldRestrictToReportedParcels(userId: string): Promise<boolean> {
+    const [callerRoles, isSuper] = await Promise.all([
+      permissionService.getUserRoles(userId),
+      permissionService.isSuperAdmin(userId),
+    ]);
+    return (
+      callerRoles.includes('LAND_OFFICER') &&
+      !callerRoles.includes('FIELD_OFFICER') &&
+      !isSuper
+    );
+  }
+
+  /**
    * Lists parcels associated with an acquisition case.
    */
   async getCaseParcels(
@@ -110,6 +127,7 @@ export class ParcelService {
   ): Promise<PaginatedCaseParcelsResult> {
     await this.assertCaseViewAccess(caseId, userId);
 
+    const requireReport = await this.shouldRestrictToReportedParcels(userId);
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
     const offset = (page - 1) * limit;
@@ -118,6 +136,7 @@ export class ParcelService {
       search: query.search,
       limit,
       offset,
+      requireReport,
     });
 
     return {
@@ -129,6 +148,34 @@ export class ParcelService {
         totalPages: Math.ceil(total / limit) || 1,
       },
     };
+  }
+
+  /**
+   * Retrieves a single parcel associated with an acquisition case, enforcing
+   * view access, administrative scope, and Land Officer report-existence visibility.
+   */
+  async getCaseParcelById(
+    caseId: string,
+    caseParcelId: string,
+    userId: string
+  ): Promise<CaseParcelWithDetails> {
+    await this.assertCaseViewAccess(caseId, userId);
+
+    const caseParcel = await parcelRepository.findCaseParcelById(caseParcelId);
+    if (!caseParcel || caseParcel.caseId !== caseId) {
+      throw new NotFoundError(
+        `Parcel association with ID '${caseParcelId}' not found for this acquisition case`
+      );
+    }
+
+    const requireReport = await this.shouldRestrictToReportedParcels(userId);
+    if (requireReport && !caseParcel.latestReportStatus) {
+      throw new NotFoundError(
+        `Parcel association with ID '${caseParcelId}' not found for this acquisition case`
+      );
+    }
+
+    return caseParcel;
   }
 
   /**

@@ -30,15 +30,7 @@ export async function GET(
 
     const { id, caseParcelId } = await context.params;
 
-    // Verify view access for case
-    await parcelService.getCaseParcels(id, { page: 1, limit: 1 }, user.id);
-
-    const caseParcel = await parcelRepository.findCaseParcelById(caseParcelId);
-    if (!caseParcel || caseParcel.caseId !== id) {
-      throw new NotFoundError(
-        `Parcel association with ID '${caseParcelId}' not found for this acquisition case`
-      );
-    }
+    const caseParcel = await parcelService.getCaseParcelById(id, caseParcelId, user.id);
 
     return NextResponse.json(
       { success: true, data: caseParcel },

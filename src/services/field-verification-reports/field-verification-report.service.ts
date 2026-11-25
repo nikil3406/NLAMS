@@ -1,3 +1,5 @@
+import { sql } from 'drizzle-orm';
+import { db } from '../../../db';
 import {
   fieldVerificationReportRepository,
   type FieldVerificationReportWithDetails,
@@ -177,29 +179,67 @@ export class FieldVerificationReportService {
     await this.assertFieldOfficerManagementAccess(caseId, userId);
     await this.assertCaseParcelBelongsToCase(caseParcelId, caseId);
 
-    const isAccepted = await fieldVerificationReportRepository.isParcelAccepted(caseParcelId);
-    if (isAccepted) {
-      throw new ConflictError(
-        'Cannot create report: field verification for this parcel has already been accepted and is permanently locked'
+    return db.transaction(async (tx) => {
+      // Lock the parcel association row to serialize concurrent report creation attempts
+      await tx.execute(sql`
+        SELECT id FROM acquisition_case_parcels
+        WHERE id = ${caseParcelId}::uuid
+        FOR UPDATE
+      `);
+
+      const isAccepted = await fieldVerificationReportRepository.isParcelAccepted(caseParcelId, tx);
+      if (isAccepted) {
+        throw new ConflictError(
+          'Cannot create report: field verification for this parcel has already been accepted and is permanently locked'
+        );
+      }
+
+      // Inspect latest report status to enforce NLAMS-07 restrictions
+      const latestRows = await tx.execute<{ status: string }>(sql`
+        SELECT status
+        FROM field_verification_reports
+        WHERE case_parcel_id = ${caseParcelId}::uuid
+        ORDER BY revision_number DESC, submitted_at DESC NULLS LAST, created_at DESC
+        LIMIT 1
+      `);
+      const latestStatus = latestRows[0]?.status;
+
+      if (latestStatus === 'SUBMITTED') {
+        throw new ConflictError(
+          'Cannot create report: a field verification report is currently under review for this parcel'
+        );
+      }
+
+      const [submittedCheck] = await tx.execute<{ hasSubmitted: boolean }>(sql`
+        SELECT EXISTS (
+          SELECT 1 FROM field_verification_reports
+          WHERE case_parcel_id = ${caseParcelId}::uuid AND status = 'SUBMITTED'
+        ) AS "hasSubmitted"
+      `);
+      if (submittedCheck?.hasSubmitted) {
+        throw new ConflictError(
+          'Cannot create report: a field verification report is currently under review for this parcel'
+        );
+      }
+
+      const report = await fieldVerificationReportRepository.createReport(
+        {
+          caseParcelId,
+          verificationDate: input.verificationDate ? new Date(input.verificationDate) : null,
+          outcome: input.outcome ?? null,
+          observations: input.observations ?? null,
+          measuredArea: input.measuredArea !== null && input.measuredArea !== undefined ? String(input.measuredArea) : null,
+          measuredAreaUnit: input.measuredAreaUnit ?? null,
+          measurementMethod: input.measurementMethod ?? null,
+          measurementNotes: input.measurementNotes ?? null,
+          createdBy: userId,
+        },
+        input.evidence,
+        tx
       );
-    }
 
-    const report = await fieldVerificationReportRepository.createReport(
-      {
-        caseParcelId,
-        verificationDate: input.verificationDate ? new Date(input.verificationDate) : null,
-        outcome: input.outcome ?? null,
-        observations: input.observations ?? null,
-        measuredArea: input.measuredArea !== null && input.measuredArea !== undefined ? String(input.measuredArea) : null,
-        measuredAreaUnit: input.measuredAreaUnit ?? null,
-        measurementMethod: input.measurementMethod ?? null,
-        measurementNotes: input.measurementNotes ?? null,
-        createdBy: userId,
-      },
-      input.evidence
-    );
-
-    return report;
+      return report;
+    });
   }
 
   /**

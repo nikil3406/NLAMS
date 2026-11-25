@@ -27,11 +27,17 @@ export function ParcelReportsSection({
 }: ParcelReportsSectionProps) {
   const isFieldOfficer = userRoles.includes('FIELD_OFFICER');
   const isAwaitingVerification = caseStatus === 'AWAITING_FIELD_VERIFICATION';
-  const canCreateReport = isFieldOfficer && isAwaitingVerification;
 
   const [reports, setReports] = useState<FieldVerificationReportWithDetails[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const hasApprovedReport = reports.some((r) => r.status === 'ACCEPTED') || Boolean(caseParcel.isAccepted);
+  const hasUnderReviewReport =
+    reports.some((r) => r.status === 'SUBMITTED') ||
+    caseParcel.latestReportStatus === 'SUBMITTED';
+  const canCreateReport =
+    isFieldOfficer && isAwaitingVerification && !hasApprovedReport && !hasUnderReviewReport;
 
   const fetchReports = useCallback(async () => {
     setIsLoading(true);
@@ -131,7 +137,7 @@ export function ParcelReportsSection({
           </span>
         </div>
 
-        {canCreateReport && (
+        {canCreateReport ? (
           <button
             type="button"
             onClick={() => onOpenReportModal(null, null)}
@@ -141,7 +147,35 @@ export function ParcelReportsSection({
           >
             + New Inspection Report
           </button>
-        )}
+        ) : isFieldOfficer && isAwaitingVerification && hasApprovedReport ? (
+          <span
+            style={{
+              fontSize: '0.75rem',
+              padding: '0.25rem 0.65rem',
+              borderRadius: '6px',
+              background: 'rgba(16, 185, 129, 0.12)',
+              color: '#34d399',
+              border: '1px solid rgba(16, 185, 129, 0.3)',
+            }}
+            id="report-creation-locked-approved-notice"
+          >
+            ✓ Verification Approved — parcel locked; no new reports allowed
+          </span>
+        ) : isFieldOfficer && isAwaitingVerification && hasUnderReviewReport ? (
+          <span
+            style={{
+              fontSize: '0.75rem',
+              padding: '0.25rem 0.65rem',
+              borderRadius: '6px',
+              background: 'rgba(59, 130, 246, 0.12)',
+              color: '#60a5fa',
+              border: '1px solid rgba(59, 130, 246, 0.3)',
+            }}
+            id="report-creation-locked-review-notice"
+          >
+            🔒 Report Under Review — new report creation disabled
+          </span>
+        ) : null}
       </div>
 
       {/* State: Loading */}

@@ -782,6 +782,13 @@ describe('NLAMS — Step 4: Field Verification Report Backend', () => {
   });
 
   it('19. Follow-up inspection creates a separate report for the same parcel (supports multiple reports)', async () => {
+    // Under NLAMS-07, a new report cannot be created while a report is SUBMITTED (under review).
+    // Transition report1Id to DISCREPANCY_FLAGGED (follow-up needed) before creating the follow-up inspection.
+    await db
+      .update(fieldVerificationReports)
+      .set({ status: 'DISCREPANCY_FLAGGED' })
+      .where(eq(fieldVerificationReports.id, report1Id));
+
     const followUpReq = makeReq(
       'POST',
       `http://localhost:3000/api/acquisition-cases/${awaitingVerifCaseId}/parcels/${caseParcelId}/reports`,

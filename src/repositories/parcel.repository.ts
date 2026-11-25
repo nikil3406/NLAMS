@@ -613,6 +613,7 @@ export class ParcelRepository {
       search?: string;
       limit?: number;
       offset?: number;
+      requireReport?: boolean;
     }
   ): Promise<ListCaseParcelsResult> {
     const limit = options?.limit ?? 20;
@@ -633,12 +634,20 @@ export class ParcelRepository {
       )`;
     }
 
+    const reportVisibilityCondition = options?.requireReport
+      ? sql`EXISTS (
+          SELECT 1 FROM field_verification_reports fvr
+          WHERE fvr.case_parcel_id = acp.id
+        )`
+      : sql`TRUE`;
+
     const [countRow] = await db.execute<{ count: string | number }>(sql`
       SELECT COUNT(*) AS count
       FROM acquisition_case_parcels acp
       INNER JOIN land_parcels lp ON lp.id = acp.parcel_id
       WHERE acp.case_id = ${caseId}::uuid
         AND ${searchCondition}
+        AND ${reportVisibilityCondition}
     `);
     const total = Number(countRow?.count ?? 0);
 
@@ -693,6 +702,7 @@ export class ParcelRepository {
       INNER JOIN users u ON u.id = acp.created_by
       WHERE acp.case_id = ${caseId}::uuid
         AND ${searchCondition}
+        AND ${reportVisibilityCondition}
       ORDER BY acp.created_at DESC
       LIMIT ${limit}
       OFFSET ${offset}
