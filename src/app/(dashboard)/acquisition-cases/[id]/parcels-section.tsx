@@ -544,6 +544,7 @@ export function ParcelsSection({
             setViewingParcel(null);
             setEditingParcel(current);
           }}
+          onRefreshParcels={fetchParcels}
         />
       )}
     </div>

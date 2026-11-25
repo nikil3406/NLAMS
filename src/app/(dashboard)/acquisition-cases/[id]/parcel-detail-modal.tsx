@@ -16,6 +16,7 @@ interface ParcelDetailModalProps {
   canEdit: boolean;
   onClose: () => void;
   onOpenEdit: () => void;
+  onRefreshParcels?: () => void;
 }
 
 export function ParcelDetailModal({
@@ -29,8 +30,11 @@ export function ParcelDetailModal({
   canEdit,
   onClose,
   onOpenEdit,
+  onRefreshParcels,
 }: ParcelDetailModalProps) {
-  const { parcel, creator } = item;
+  const { parcel } = item;
+  const [isLockedLocally, setIsLockedLocally] = useState(false);
+  const effectiveCanEdit = canEdit && !isLockedLocally;
   const [activeReportModal, setActiveReportModal] = useState<{
     isOpen: boolean;
     reportId?: string | null;
@@ -111,7 +115,7 @@ export function ParcelDetailModal({
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            {canEdit && onOpenEdit && (
+            {effectiveCanEdit && onOpenEdit && (
               <button
                 type="button"
                 onClick={onOpenEdit}
@@ -363,14 +367,14 @@ export function ParcelDetailModal({
           >
             Close
           </button>
-          {canEdit && (
+          {effectiveCanEdit && (
             <button
               type="button"
               onClick={onOpenEdit}
               className="btn-primary"
               id="edit-parcel-from-detail-btn"
             >
-              ✎ Edit Affected Area
+              ✎ Edit Parcel
             </button>
           )}
         </div>
@@ -387,8 +391,12 @@ export function ParcelDetailModal({
           currentUserId={currentUserId || ''}
           userRoles={userRoles || []}
           onClose={() => setActiveReportModal({ isOpen: false })}
-          onReportSaved={() => {
+          onReportSaved={(savedReport) => {
+            if (savedReport && savedReport.status !== 'DRAFT') {
+              setIsLockedLocally(true);
+            }
             setReportsRefreshTrigger((prev) => prev + 1);
+            onRefreshParcels?.();
           }}
           onFollowUpInspection={() => {
             setActiveReportModal({ isOpen: true, reportId: null, reportData: null });
@@ -408,8 +416,10 @@ export function ParcelDetailModal({
           isVerifiedLandOfficer={isVerifiedLandOfficer}
           onClose={() => setActiveReviewModal({ isOpen: false, reportData: null })}
           onDecisionSuccess={() => {
+            setIsLockedLocally(true);
             setActiveReviewModal({ isOpen: false, reportData: null });
             setReportsRefreshTrigger((prev) => prev + 1);
+            onRefreshParcels?.();
           }}
           onCorrectionInitiated={(newDraft) => {
             setActiveReviewModal({ isOpen: false, reportData: null });

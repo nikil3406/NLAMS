@@ -41,7 +41,10 @@ import {
   GET as caseParcelsGetHandler,
   POST as caseParcelsPostHandler,
 } from '../../src/app/api/acquisition-cases/[id]/parcels/route';
-import { GET as caseParcelDetailGetHandler } from '../../src/app/api/acquisition-cases/[id]/parcels/[caseParcelId]/route';
+import {
+  GET as caseParcelDetailGetHandler,
+  PATCH as caseParcelDetailPatchHandler,
+} from '../../src/app/api/acquisition-cases/[id]/parcels/[caseParcelId]/route';
 import { POST as parcelReportsPostHandler } from '../../src/app/api/acquisition-cases/[id]/parcels/[caseParcelId]/reports/route';
 import { POST as reportSubmitPostHandler } from '../../src/app/api/acquisition-cases/[id]/parcels/[caseParcelId]/reports/[reportId]/submit/route';
 import { POST as reportReviewPostHandler } from '../../src/app/api/acquisition-cases/[id]/parcels/[caseParcelId]/reports/[reportId]/review/route';
@@ -306,6 +309,18 @@ describe('NLAMS-05 & NLAMS-07 — Parcel Visibility and Subsequent Report Restri
     );
     assert.equal(subRes.status, 200);
     assert.equal((await subRes.json()).data.status, 'SUBMITTED');
+
+    // NLAMS-06: Once a report is submitted, parcel editing via PATCH must be blocked (409 Conflict)
+    const editAfterSubmitRes = await caseParcelDetailPatchHandler(
+      makeReq(
+        'PATCH',
+        `http://localhost:3000/api/acquisition-cases/${kaCaseId}/parcels/${parcel1CaseParcelId}`,
+        fieldOfficerCookie,
+        { proposedAffectedArea: 1500, affectedAreaUnit: 'SQ_M' }
+      ),
+      { params: Promise.resolve({ id: kaCaseId, caseParcelId: parcel1CaseParcelId }) }
+    );
+    assert.equal(editAfterSubmitRes.status, 409, 'Parcel editing must be blocked after report submission');
   });
 
   it('NLAMS-07.2: Previous report is SUBMITTED (under review) -> new report creation is blocked (409 Conflict)', async () => {
