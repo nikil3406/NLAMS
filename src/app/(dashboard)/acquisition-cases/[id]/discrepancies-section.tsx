@@ -70,7 +70,7 @@ export function DiscrepanciesSection({
 
   // Create Discrepancy Modal state (for Field Officer)
   const [isCreatingDiscrepancy, setIsCreatingDiscrepancy] = useState(false);
-  const [caseParcels, setCaseParcels] = useState<{ id: string; parcel: { parcelId: string; surveyNumber: string; village: string } }[]>([]);
+  const [caseParcels, setCaseParcels] = useState<{ id: string; hasFieldReport?: boolean; parcel: { parcelId: string; surveyNumber: string; village: string } }[]>([]);
   const [isLoadingParcels, setIsLoadingParcels] = useState(false);
   const [selectedCaseParcelId, setSelectedCaseParcelId] = useState('');
   const [newCategory, setNewCategory] = useState('SURVEY_IDENTITY_MISMATCH');
@@ -81,23 +81,27 @@ export function DiscrepanciesSection({
   const [isSubmittingCreate, setIsSubmittingCreate] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
+  const eligibleParcels = caseParcels.filter((cp) => !cp.hasFieldReport);
+
   const fetchCaseParcels = useCallback(async () => {
     setIsLoadingParcels(true);
     try {
       const res = await fetch(`/api/acquisition-cases/${caseId}/parcels?limit=100`);
       if (res.ok) {
         const json = await res.json();
-        const list = json.data || [];
+        const list: { id: string; hasFieldReport?: boolean; parcel: { parcelId: string; surveyNumber: string; village: string } }[] = json.data || [];
         setCaseParcels(list);
-        if (list.length > 0 && !selectedCaseParcelId) {
-          setSelectedCaseParcelId(list[0].id);
-        }
+        const firstEligible = list.find((cp) => !cp.hasFieldReport);
+        setSelectedCaseParcelId((prev) => {
+          if (prev && list.some((cp) => cp.id === prev && !cp.hasFieldReport)) return prev;
+          return firstEligible ? firstEligible.id : '';
+        });
       }
     } catch {}
     finally {
       setIsLoadingParcels(false);
     }
-  }, [caseId, selectedCaseParcelId]);
+  }, [caseId]);
 
   const handleOpenCreateModal = () => {
     setIsCreatingDiscrepancy(true);
@@ -187,7 +191,8 @@ export function DiscrepanciesSection({
 
   useEffect(() => {
     fetchDiscrepancies();
-  }, [fetchDiscrepancies]);
+    fetchCaseParcels();
+  }, [fetchDiscrepancies, fetchCaseParcels]);
 
   const handleDiscrepancyUpdated = (updated: DiscrepancyWithDetails) => {
     setSelectedDiscrepancy(updated);
@@ -295,9 +300,10 @@ export function DiscrepanciesSection({
           </div>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          {isFieldOfficer && (
+          {isFieldOfficer && eligibleParcels.length > 0 && (
             <button
               onClick={handleOpenCreateModal}
+              id="create-discrepancy-btn"
               style={{
                 padding: '0.4rem 0.8rem',
                 backgroundColor: '#16a34a',
@@ -542,7 +548,7 @@ export function DiscrepanciesSection({
                       fontSize: '0.875rem',
                     }}
                   >
-                    {caseParcels.map((cp) => (
+                    {eligibleParcels.map((cp) => (
                       <option key={cp.id} value={cp.id}>
                         {cp.parcel?.parcelId || 'Parcel'} — Survey #{cp.parcel?.surveyNumber || '-'} ({cp.parcel?.village || '-'})
                       </option>

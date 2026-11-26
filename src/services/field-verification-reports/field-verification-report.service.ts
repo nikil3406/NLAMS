@@ -187,6 +187,20 @@ export class FieldVerificationReportService {
         FOR UPDATE
       `);
 
+      // NLAMS-08: Block report creation if any unresolved discrepancy exists for this parcel
+      const [discrepancyCheck] = await tx.execute<{ hasUnresolved: boolean }>(sql`
+        SELECT EXISTS (
+          SELECT 1 FROM parcel_discrepancies
+          WHERE case_parcel_id = ${caseParcelId}::uuid
+            AND status != 'RESOLVED'
+        ) AS "hasUnresolved"
+      `);
+      if (discrepancyCheck?.hasUnresolved) {
+        throw new ConflictError(
+          'Cannot create report: parcel has unresolved discrepancies that must be resolved and closed first'
+        );
+      }
+
       const isAccepted = await fieldVerificationReportRepository.isParcelAccepted(caseParcelId, tx);
       if (isAccepted) {
         throw new ConflictError(

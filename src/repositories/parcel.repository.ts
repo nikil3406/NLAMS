@@ -53,6 +53,9 @@ export interface CaseParcelWithDetails {
   latestReportStatus?: string | null;
   isAccepted?: boolean;
   isLocked?: boolean;
+  hasUnresolvedDiscrepancy?: boolean;
+  unresolvedDiscrepancyCount?: number;
+  hasFieldReport?: boolean;
 }
 
 export interface ListCaseParcelsResult {
@@ -413,6 +416,12 @@ export class ParcelRepository {
           SELECT fvr.status
           FROM field_verification_reports fvr
           WHERE fvr.case_parcel_id = acp.id
+            AND NOT (
+              fvr.status = 'DISCREPANCY_FLAGGED'
+              AND fvr.outcome = 'DISCREPANCY_FOUND'
+              AND fvr.reviewed_by IS NULL
+              AND fvr.review_decision IS NULL
+            )
           ORDER BY fvr.revision_number DESC, fvr.submitted_at DESC NULLS LAST, fvr.created_at DESC
           LIMIT 1
         ) AS "latestReportStatus",
@@ -422,8 +431,33 @@ export class ParcelRepository {
         ) AS "isAccepted",
         EXISTS (
           SELECT 1 FROM field_verification_reports fvr
-          WHERE fvr.case_parcel_id = acp.id AND fvr.status != 'DRAFT'
-        ) AS "isLocked"
+          WHERE fvr.case_parcel_id = acp.id
+            AND fvr.status != 'DRAFT'
+            AND NOT (
+              fvr.status = 'DISCREPANCY_FLAGGED'
+              AND fvr.outcome = 'DISCREPANCY_FOUND'
+              AND fvr.reviewed_by IS NULL
+              AND fvr.review_decision IS NULL
+            )
+        ) AS "isLocked",
+        EXISTS (
+          SELECT 1 FROM parcel_discrepancies pd
+          WHERE pd.case_parcel_id = acp.id AND pd.status != 'RESOLVED'
+        ) AS "hasUnresolvedDiscrepancy",
+        (
+          SELECT COUNT(*)::int FROM parcel_discrepancies pd
+          WHERE pd.case_parcel_id = acp.id AND pd.status != 'RESOLVED'
+        ) AS "unresolvedDiscrepancyCount",
+        EXISTS (
+          SELECT 1 FROM field_verification_reports fvr
+          WHERE fvr.case_parcel_id = acp.id
+            AND NOT (
+              fvr.status = 'DISCREPANCY_FLAGGED'
+              AND fvr.outcome = 'DISCREPANCY_FOUND'
+              AND fvr.reviewed_by IS NULL
+              AND fvr.review_decision IS NULL
+            )
+        ) AS "hasFieldReport"
       FROM acquisition_case_parcels acp
       INNER JOIN land_parcels lp ON lp.id = acp.parcel_id
       INNER JOIN users u ON u.id = acp.created_by
@@ -471,6 +505,9 @@ export class ParcelRepository {
       latestReportStatus: row.latestReportStatus ? String(row.latestReportStatus) : null,
       isAccepted: Boolean(row.isAccepted),
       isLocked: Boolean(row.isLocked),
+      hasUnresolvedDiscrepancy: Boolean(row.hasUnresolvedDiscrepancy),
+      unresolvedDiscrepancyCount: Number(row.unresolvedDiscrepancyCount ?? 0),
+      hasFieldReport: Boolean(row.hasFieldReport),
     };
   }
 
@@ -690,6 +727,12 @@ export class ParcelRepository {
           SELECT fvr.status
           FROM field_verification_reports fvr
           WHERE fvr.case_parcel_id = acp.id
+            AND NOT (
+              fvr.status = 'DISCREPANCY_FLAGGED'
+              AND fvr.outcome = 'DISCREPANCY_FOUND'
+              AND fvr.reviewed_by IS NULL
+              AND fvr.review_decision IS NULL
+            )
           ORDER BY fvr.revision_number DESC, fvr.submitted_at DESC NULLS LAST, fvr.created_at DESC
           LIMIT 1
         ) AS "latestReportStatus",
@@ -699,8 +742,33 @@ export class ParcelRepository {
         ) AS "isAccepted",
         EXISTS (
           SELECT 1 FROM field_verification_reports fvr
-          WHERE fvr.case_parcel_id = acp.id AND fvr.status != 'DRAFT'
-        ) AS "isLocked"
+          WHERE fvr.case_parcel_id = acp.id
+            AND fvr.status != 'DRAFT'
+            AND NOT (
+              fvr.status = 'DISCREPANCY_FLAGGED'
+              AND fvr.outcome = 'DISCREPANCY_FOUND'
+              AND fvr.reviewed_by IS NULL
+              AND fvr.review_decision IS NULL
+            )
+        ) AS "isLocked",
+        EXISTS (
+          SELECT 1 FROM parcel_discrepancies pd
+          WHERE pd.case_parcel_id = acp.id AND pd.status != 'RESOLVED'
+        ) AS "hasUnresolvedDiscrepancy",
+        (
+          SELECT COUNT(*)::int FROM parcel_discrepancies pd
+          WHERE pd.case_parcel_id = acp.id AND pd.status != 'RESOLVED'
+        ) AS "unresolvedDiscrepancyCount",
+        EXISTS (
+          SELECT 1 FROM field_verification_reports fvr
+          WHERE fvr.case_parcel_id = acp.id
+            AND NOT (
+              fvr.status = 'DISCREPANCY_FLAGGED'
+              AND fvr.outcome = 'DISCREPANCY_FOUND'
+              AND fvr.reviewed_by IS NULL
+              AND fvr.review_decision IS NULL
+            )
+        ) AS "hasFieldReport"
       FROM acquisition_case_parcels acp
       INNER JOIN land_parcels lp ON lp.id = acp.parcel_id
       INNER JOIN users u ON u.id = acp.created_by
@@ -749,6 +817,9 @@ export class ParcelRepository {
       latestReportStatus: row.latestReportStatus ? String(row.latestReportStatus) : null,
       isAccepted: Boolean(row.isAccepted),
       isLocked: Boolean(row.isLocked),
+      hasUnresolvedDiscrepancy: Boolean(row.hasUnresolvedDiscrepancy),
+      unresolvedDiscrepancyCount: Number(row.unresolvedDiscrepancyCount ?? 0),
+      hasFieldReport: Boolean(row.hasFieldReport),
     }));
 
     return { data, total };

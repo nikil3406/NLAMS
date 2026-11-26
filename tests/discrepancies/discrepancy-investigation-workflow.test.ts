@@ -430,16 +430,45 @@ describe('NLAMS — Step 6: Discrepancy Investigation and Resolution Workflow', 
   });
 
   it('3b. Field Officer creates and submits discrepancy directly via API', async () => {
-    const directReportId = await createAndSubmitReport('DISCREPANCY_FOUND');
+    // Under NLAMS-08, discrepancy creation is only permitted on parcels without a Field Officer report
+    // and report creation is blocked on parcels with unresolved discrepancies. Use a dedicated parcel.
+    const [p2] = await db
+      .insert(landParcels)
+      .values({
+        parcelId: `PRCL-3B-${ts}`,
+        administrativeUnitId: unitIdKA,
+        state: 'Karnataka',
+        district: 'Bengaluru Urban',
+        taluk: 'Yelahanka',
+        village: 'Yelahanka',
+        surveyNumber: `602-${ts}`,
+        totalArea: '1200.0000',
+        areaUnit: 'SQ_M',
+        createdBy: superAdminId,
+      })
+      .returning({ id: landParcels.id });
+    createdParcelIds.push(p2.id);
+
+    const [cp2] = await db
+      .insert(acquisitionCaseParcels)
+      .values({
+        caseId,
+        parcelId: p2.id,
+        proposedAffectedArea: '600.0000',
+        affectedAreaUnit: 'SQ_M',
+        createdBy: landOfficer1Id,
+      })
+      .returning({ id: acquisitionCaseParcels.id });
+    createdCaseParcelIds.push(cp2.id);
+
     const req = makeReq(
       'POST',
       `http://localhost:3000/api/acquisition-cases/${caseId}/discrepancies`,
       fieldOfficerAuthorCookie,
       {
-        caseParcelId: caseParcel1Id,
+        caseParcelId: cp2.id,
         category: 'AREA_MISMATCH',
         description: 'Physical ground measurement diverges significantly from cadastral map.',
-        reportId: directReportId,
       }
     );
     const res = await createDiscrepancyHandler(req, {

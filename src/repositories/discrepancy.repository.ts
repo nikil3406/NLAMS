@@ -724,6 +724,26 @@ export class DiscrepancyRepository {
         createdAt: now,
       });
 
+      // NLAMS-09: Synchronize parcel discrepancy flag within the same transaction.
+      // Check all discrepancies for the same parcel; flag is cleared only when zero unresolved discrepancies remain.
+      const [remainingCheck] = await tx.execute<{ hasUnresolved: boolean }>(sql`
+        SELECT EXISTS (
+          SELECT 1 FROM parcel_discrepancies
+          WHERE case_parcel_id = ${updated.caseParcelId}::uuid
+            AND status != 'RESOLVED'
+        ) AS "hasUnresolved"
+      `);
+      const hasRemainingUnresolved = Boolean(remainingCheck?.hasUnresolved);
+
+      // Touch acquisition_case_parcels.updated_at atomically when the final discrepancy is resolved
+      if (data.decision === 'RESOLVED' && !hasRemainingUnresolved) {
+        await tx.execute(sql`
+          UPDATE acquisition_case_parcels
+          SET updated_at = NOW()
+          WHERE id = ${updated.caseParcelId}::uuid
+        `);
+      }
+
       const full = await this.findDiscrepancyById(discrepancyId, tx);
       if (!full) throw new Error('Failed to retrieve resolved discrepancy');
       return full;

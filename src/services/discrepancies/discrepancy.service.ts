@@ -1,6 +1,7 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { db } from '../../../db';
 import { acquisitionCaseParcels } from '../../../db/schema/acquisition-case-parcels';
+import { parcelDiscrepancies } from '../../../db/schema/parcel-discrepancies';
 import { fieldVerificationReports } from '../../../db/schema/field-verification-reports';
 import {
   fieldVerificationEvidence,
@@ -143,57 +144,61 @@ export class DiscrepancyService {
       );
     }
 
-    // Verify parcel belongs to case
-    const [caseParcel] = await db
-      .select({ id: acquisitionCaseParcels.id })
-      .from(acquisitionCaseParcels)
-      .where(
-        and(
-          eq(acquisitionCaseParcels.id, input.caseParcelId),
-          eq(acquisitionCaseParcels.caseId, caseId)
-        )
-      )
-      .limit(1);
+    return db.transaction(async (tx) => {
+      // Lock the parcel association row to serialize concurrent discrepancy/report creation checks
+      const [caseParcel] = await tx.execute<{ id: string }>(sql`
+        SELECT id FROM acquisition_case_parcels
+        WHERE id = ${input.caseParcelId}::uuid AND case_id = ${caseId}::uuid
+        FOR UPDATE
+      `);
 
-    if (!caseParcel) {
-      throw new NotFoundError(
-        `Case parcel '${input.caseParcelId}' not found for case '${caseId}'`
-      );
-    }
-
-    // Resolve reportId
-    let reportId = input.reportId;
-    if (reportId) {
-      const [rpt] = await db
-        .select({ id: fieldVerificationReports.id })
-        .from(fieldVerificationReports)
-        .where(
-          and(
-            eq(fieldVerificationReports.id, reportId),
-            eq(fieldVerificationReports.caseParcelId, input.caseParcelId)
-          )
-        )
-        .limit(1);
-      if (!rpt) {
+      if (!caseParcel) {
         throw new NotFoundError(
-          `Field verification report '${reportId}' not found for parcel '${input.caseParcelId}'`
+          `Case parcel '${input.caseParcelId}' not found for case '${caseId}'`
         );
       }
-    } else {
-      // Find latest report for this parcel
-      const [latestReport] = await db
-        .select({ id: fieldVerificationReports.id })
-        .from(fieldVerificationReports)
-        .where(eq(fieldVerificationReports.caseParcelId, input.caseParcelId))
-        .orderBy(desc(fieldVerificationReports.createdAt))
-        .limit(1);
 
-      if (latestReport) {
-        reportId = latestReport.id;
+      // NLAMS-08: Discrepancy cannot be created once a Field Officer report exists (regardless of report status)
+      const [reportCheck] = await tx.execute<{ hasFieldReport: boolean }>(sql`
+        SELECT EXISTS (
+          SELECT 1 FROM field_verification_reports fvr
+          WHERE fvr.case_parcel_id = ${input.caseParcelId}::uuid
+            AND NOT (
+              fvr.status = 'DISCREPANCY_FLAGGED'
+              AND fvr.outcome = 'DISCREPANCY_FOUND'
+              AND fvr.reviewed_by IS NULL
+              AND fvr.review_decision IS NULL
+            )
+        ) AS "hasFieldReport"
+      `);
+
+      if (reportCheck?.hasFieldReport) {
+        throw new ConflictError(
+          'Cannot create discrepancy: a Field Officer verification report already exists for this parcel'
+        );
+      }
+
+      // Resolve reportId for FK integrity (reuse existing placeholder or create one)
+      let reportId = input.reportId;
+      if (reportId) {
+        const [rpt] = await tx
+          .select({ id: fieldVerificationReports.id })
+          .from(fieldVerificationReports)
+          .where(
+            and(
+              eq(fieldVerificationReports.id, reportId),
+              eq(fieldVerificationReports.caseParcelId, input.caseParcelId)
+            )
+          )
+          .limit(1);
+        if (!rpt) {
+          throw new NotFoundError(
+            `Field verification report '${reportId}' not found for parcel '${input.caseParcelId}'`
+          );
+        }
       } else {
-        // If no report exists, create a report entry for this parcel
         const now = new Date();
-        const [newReport] = await db
+        const [newReport] = await tx
           .insert(fieldVerificationReports)
           .values({
             caseParcelId: input.caseParcelId,
@@ -208,28 +213,38 @@ export class DiscrepancyService {
           .returning({ id: fieldVerificationReports.id });
         reportId = newReport.id;
       }
-    }
 
-    if (input.evidence && input.evidence.length > 0 && reportId) {
-      for (const ev of input.evidence) {
-        await db.insert(fieldVerificationEvidence).values({
-          reportId,
-          evidenceType: ev.evidenceType,
-          fileReference: ev.fileReference.trim(),
-          caption: ev.caption?.trim() || null,
-          description: ev.description?.trim() || null,
-          createdBy: userId,
-        });
+      if (input.evidence && input.evidence.length > 0 && reportId) {
+        for (const ev of input.evidence) {
+          await tx.insert(fieldVerificationEvidence).values({
+            reportId,
+            evidenceType: ev.evidenceType,
+            fileReference: ev.fileReference.trim(),
+            caption: ev.caption?.trim() || null,
+            description: ev.description?.trim() || null,
+            createdBy: userId,
+          });
+        }
       }
-    }
 
-    return discrepancyRepository.findOrCreateDiscrepancyForReport({
-      caseId,
-      caseParcelId: input.caseParcelId,
-      reportId,
-      category: input.category,
-      description: input.description.trim(),
-      createdBy: userId,
+      const [inserted] = await tx
+        .insert(parcelDiscrepancies)
+        .values({
+          caseId,
+          caseParcelId: input.caseParcelId,
+          reportId,
+          category: input.category,
+          description: input.description.trim(),
+          status: 'OPEN',
+          createdBy: userId,
+        })
+        .returning({ id: parcelDiscrepancies.id });
+
+      const full = await discrepancyRepository.findDiscrepancyById(inserted.id, tx);
+      if (!full) {
+        throw new Error('Failed to retrieve newly created discrepancy');
+      }
+      return full;
     });
   }
 

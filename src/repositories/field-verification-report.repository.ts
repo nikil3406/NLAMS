@@ -135,6 +135,7 @@ export class FieldVerificationReportRepository {
         fvr.status,
         fvr.submitted_at AS "submittedAt",
         fvr.reviewed_by AS "reviewedBy",
+        fvr.reviewed_by AS "reviewedBy",
         fvr.reviewed_at AS "reviewedAt",
         fvr.review_decision AS "reviewDecision",
         fvr.review_remarks AS "reviewRemarks",
@@ -621,6 +622,7 @@ export class FieldVerificationReportRepository {
         fvr.status,
         fvr.submitted_at AS "submittedAt",
         fvr.reviewed_by AS "reviewedBy",
+        fvr.reviewed_by AS "reviewedBy",
         fvr.reviewed_at AS "reviewedAt",
         fvr.review_decision AS "reviewDecision",
         fvr.review_remarks AS "reviewRemarks",
@@ -727,6 +729,7 @@ export class FieldVerificationReportRepository {
         fvr.measurement_notes AS "measurementNotes",
         fvr.status,
         fvr.submitted_at AS "submittedAt",
+        fvr.reviewed_by AS "reviewedBy",
         fvr.reviewed_by AS "reviewedBy",
         fvr.reviewed_at AS "reviewedAt",
         fvr.review_decision AS "reviewDecision",
@@ -874,6 +877,7 @@ export class FieldVerificationReportRepository {
         fvr.status,
         fvr.submitted_at AS "submittedAt",
         fvr.reviewed_by AS "reviewedBy",
+        fvr.reviewed_by AS "reviewedBy",
         fvr.reviewed_at AS "reviewedAt",
         fvr.review_decision AS "reviewDecision",
         fvr.review_remarks AS "reviewRemarks",
@@ -992,6 +996,7 @@ export class FieldVerificationReportRepository {
         fvr.revision_number AS "revisionNumber",
         fvr.submitted_at AS "submittedAt",
         fvr.created_at AS "createdAt",
+        fvr.reviewed_by AS "reviewedBy",
         fvr.reviewed_at AS "reviewedAt",
         fvr.review_decision AS "reviewDecision",
         fvr.review_remarks AS "reviewRemarks",
@@ -1083,13 +1088,30 @@ export class FieldVerificationReportRepository {
 
     // 5. Evaluate current verification status for each parcel using selection rule:
     // Highest revision_number, then latest submitted_at, then latest created_at.
+    const unresolvedRows = await executor.execute<{ caseParcelId: string }>(sql`
+      SELECT DISTINCT case_parcel_id AS "caseParcelId"
+      FROM parcel_discrepancies
+      WHERE case_id = ${caseId}::uuid AND status != 'RESOLVED'
+    `);
+    const unresolvedParcelIds = new Set(unresolvedRows.map((r) => String(r.caseParcelId)));
+
     const parcelsSummary = caseParcelsRows.map((cp) => {
       const cpId = String(cp.caseParcelId);
-      const parcelReports = reportsByCaseParcel[cpId] ?? [];
+      const parcelReports = (reportsByCaseParcel[cpId] ?? []).filter(
+        (r) =>
+          !(
+            r.status === 'DISCREPANCY_FLAGGED' &&
+            r.outcome === 'DISCREPANCY_FOUND' &&
+            !r.reviewedBy &&
+            !r.reviewDecision
+          )
+      );
       const latestReport = parcelReports[0] ?? null;
 
       let currentVerificationStatus = 'PENDING_INSPECTION';
-      if (latestReport) {
+      if (unresolvedParcelIds.has(cpId)) {
+        currentVerificationStatus = 'DISCREPANCY_FLAGGED';
+      } else if (latestReport) {
         if (latestReport.status === 'ACCEPTED') {
           currentVerificationStatus = 'VERIFIED_ACCEPTED';
         } else if (latestReport.status === 'SUBMITTED') {

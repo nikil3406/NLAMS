@@ -36,8 +36,13 @@ export function ParcelReportsSection({
   const hasUnderReviewReport =
     reports.some((r) => r.status === 'SUBMITTED') ||
     caseParcel.latestReportStatus === 'SUBMITTED';
+  const hasUnresolvedDiscrepancy = Boolean(caseParcel.hasUnresolvedDiscrepancy);
   const canCreateReport =
-    isFieldOfficer && isAwaitingVerification && !hasApprovedReport && !hasUnderReviewReport;
+    isFieldOfficer &&
+    isAwaitingVerification &&
+    !hasApprovedReport &&
+    !hasUnderReviewReport &&
+    !hasUnresolvedDiscrepancy;
 
   const fetchReports = useCallback(async () => {
     setIsLoading(true);
@@ -160,6 +165,20 @@ export function ParcelReportsSection({
             id="report-creation-locked-approved-notice"
           >
             ✓ Verification Approved — parcel locked; no new reports allowed
+          </span>
+        ) : isFieldOfficer && isAwaitingVerification && hasUnresolvedDiscrepancy ? (
+          <span
+            style={{
+              fontSize: '0.75rem',
+              padding: '0.25rem 0.65rem',
+              borderRadius: '6px',
+              background: 'rgba(239, 68, 68, 0.12)',
+              color: '#f87171',
+              border: '1px solid rgba(239, 68, 68, 0.3)',
+            }}
+            id="report-creation-locked-discrepancy-notice"
+          >
+            ⚠️ Unresolved Discrepancy — resolve all parcel discrepancies before creating a report
           </span>
         ) : isFieldOfficer && isAwaitingVerification && hasUnderReviewReport ? (
           <span

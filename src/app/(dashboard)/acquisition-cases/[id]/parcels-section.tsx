@@ -431,6 +431,8 @@ export function ParcelsSection({
                         {(() => {
                           const statusBadge = item.isAccepted
                             ? { bg: 'rgba(16, 185, 129, 0.15)', color: '#34d399', border: 'rgba(16, 185, 129, 0.3)', label: '✓ Verified & Accepted' }
+                            : item.hasUnresolvedDiscrepancy
+                            ? { bg: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: 'rgba(239, 68, 68, 0.3)', label: '⚠️ Discrepancy Flagged' }
                             : item.latestReportStatus === 'SUBMITTED'
                             ? { bg: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', border: 'rgba(59, 130, 246, 0.3)', label: '🔒 Awaiting Review' }
                             : item.latestReportStatus === 'RETURNED_FOR_CORRECTION'
