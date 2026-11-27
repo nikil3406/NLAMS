@@ -23,8 +23,30 @@ import {
   ForbiddenError,
   NotFoundError,
 } from '../../types/errors';
+import { convertAreaToSqm, convertAreaFromSqm } from '../../lib/geo-utils';
 
 export type TransactionClient = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * Precision tolerance in square metres after normalizing area units.
+ * 0.01 sq m (100 cm^2) absorbs IEEE-754 and numeric(18,2)/(18,4) rounding across
+ * SQ_M, HECTARE, ACRE, and SQ_KM conversions without permitting meaningful area discrepancies.
+ */
+export const AREA_COMPARISON_TOLERANCE_SQM = 0.01;
+
+export interface AreaValidationSummary {
+  hasRequiredArea: boolean;
+  requiredArea: number | null;
+  requiredUnit: string | null;
+  requiredAreaSqm: number | null;
+  verifiedAreaInRequiredUnit: number | null;
+  verifiedAreaSqm: number;
+  differenceSqm: number | null;
+  differenceInRequiredUnit: number | null;
+  toleranceSqm: number;
+  status: 'MATCHED' | 'INSUFFICIENT' | 'EXCEEDS' | 'NO_REQUIRED_AREA';
+  isMatched: boolean;
+}
 
 export interface UnmetCondition {
   code:
@@ -38,7 +60,8 @@ export interface UnmetCondition {
     | 'UNRESOLVED_DISCREPANCY'
     | 'DISCREPANCY_NOT_FORMALLY_RESOLVED'
     | 'MISSING_AUDIT_RECORD'
-    | 'INVALID_CASE_STATUS';
+    | 'INVALID_CASE_STATUS'
+    | 'AREA_MISMATCH';
   message: string;
   parcelId?: string;
   caseParcelId?: string;
@@ -54,6 +77,7 @@ export interface CaseCompletionEligibility {
   acceptedParcels: number;
   reportsAwaitingReview: number;
   unresolvedDiscrepancies: number;
+  areaValidation: AreaValidationSummary;
   unmetConditions: UnmetCondition[];
 }
 
@@ -125,6 +149,7 @@ export class FieldVerificationCompletionService {
     const [caseRow] = await executor
       .select({
         id: acquisitionCases.id,
+        projectId: acquisitionCases.projectId,
         status: acquisitionCases.status,
       })
       .from(acquisitionCases)
@@ -150,6 +175,8 @@ export class FieldVerificationCompletionService {
       SELECT
         acp.id AS "caseParcelId",
         acp.parcel_id AS "parcelId",
+        acp.proposed_affected_area AS "proposedAffectedArea",
+        acp.affected_area_unit AS "affectedAreaUnit",
         lp.parcel_id AS "parcelIdentifier",
         lp.survey_number AS "surveyNumber"
       FROM acquisition_case_parcels acp
@@ -173,6 +200,8 @@ export class FieldVerificationCompletionService {
         fvr.case_parcel_id AS "caseParcelId",
         fvr.status,
         fvr.outcome,
+        fvr.measured_area AS "measuredArea",
+        fvr.measured_area_unit AS "measuredAreaUnit",
         fvr.reviewed_by AS "reviewedBy",
         fvr.reviewed_at AS "reviewedAt",
         fvr.review_decision AS "reviewDecision",
@@ -329,10 +358,11 @@ export class FieldVerificationCompletionService {
       }
     }
 
-    // 4. Validate formal discrepancies for this case
+    // 4. Validate formal discrepancies for this case (and track parcels with unresolved discrepancies)
     const discrepancyRows = await executor.execute(sql`
       SELECT
         pd.id,
+        pd.case_parcel_id AS "caseParcelId",
         pd.status,
         pd.category,
         pd.description,
@@ -351,14 +381,18 @@ export class FieldVerificationCompletionService {
     `);
 
     let unresolvedDiscrepancies = 0;
+    const parcelsWithUnresolvedDiscrepancies = new Set<string>();
 
     for (const d of discrepancyRows) {
       const discId = String(d.id);
+      const discCaseParcelId = String(d.caseParcelId);
       if (d.status !== 'RESOLVED') {
         unresolvedDiscrepancies++;
+        parcelsWithUnresolvedDiscrepancies.add(discCaseParcelId);
         unmetConditions.push({
           code: 'UNRESOLVED_DISCREPANCY',
           discrepancyId: discId,
+          caseParcelId: discCaseParcelId,
           message: `Discrepancy '${discId}' is not resolved (current status: '${d.status}').`,
         });
       } else {
@@ -366,9 +400,11 @@ export class FieldVerificationCompletionService {
         const resolvedDecisions = Number(d.resolvedDecisionCount || 0);
         if (resolvedDecisions < 1) {
           unresolvedDiscrepancies++;
+          parcelsWithUnresolvedDiscrepancies.add(discCaseParcelId);
           unmetConditions.push({
             code: 'DISCREPANCY_NOT_FORMALLY_RESOLVED',
             discrepancyId: discId,
+            caseParcelId: discCaseParcelId,
             message: `Discrepancy '${discId}' is marked RESOLVED but lacks an authorized resolution decision in history.`,
           });
         }
@@ -376,12 +412,115 @@ export class FieldVerificationCompletionService {
         // Business rule: "An authorized exception must not count as a resolved discrepancy."
         if (d.hasExceptionDecision) {
           unresolvedDiscrepancies++;
+          parcelsWithUnresolvedDiscrepancies.add(discCaseParcelId);
           unmetConditions.push({
             code: 'UNRESOLVED_DISCREPANCY',
             discrepancyId: discId,
+            caseParcelId: discCaseParcelId,
             message: `Discrepancy '${discId}' was closed as an administrative exception, which cannot count as a resolved discrepancy for verification completion.`,
           });
         }
+      }
+    }
+
+    // 5. NLAMS-10: Required vs Verified Land-Area Validation
+    // Sum verified affected area across ONLY accepted parcels without unresolved discrepancies
+    let rawVerifiedSqm = 0;
+    for (const cp of caseParcelsRows) {
+      const cpId = String(cp.caseParcelId);
+      if (parcelsWithUnresolvedDiscrepancies.has(cpId)) continue;
+      const parcelReports = reportsByCaseParcel.get(cpId) || [];
+      const latestReport = parcelReports[0];
+      if (!latestReport || latestReport.status !== 'ACCEPTED') continue;
+
+      const hasMeasured =
+        latestReport.measuredArea !== null &&
+        latestReport.measuredArea !== undefined &&
+        !isNaN(Number(latestReport.measuredArea)) &&
+        Number(latestReport.measuredArea) > 0;
+
+      const areaValue = hasMeasured
+        ? Number(latestReport.measuredArea)
+        : Number(cp.proposedAffectedArea);
+      const areaUnit = hasMeasured
+        ? String(latestReport.measuredAreaUnit || cp.affectedAreaUnit || 'SQ_M')
+        : String(cp.affectedAreaUnit || 'SQ_M');
+
+      if (!isNaN(areaValue) && areaValue > 0) {
+        rawVerifiedSqm += convertAreaToSqm(areaValue, areaUnit);
+      }
+    }
+
+    const verifiedAreaSqm = Math.round(rawVerifiedSqm * 1e6) / 1e6;
+
+    // Retrieve required land area from the project's latest boundary version
+    const [boundaryRow] = await executor.execute<{
+      estimatedLandArea: string;
+      estimatedAreaUnit: string;
+    }>(sql`
+      SELECT
+        estimated_land_area AS "estimatedLandArea",
+        estimated_area_unit AS "estimatedAreaUnit"
+      FROM project_boundary_versions
+      WHERE project_id = ${caseRow.projectId}::uuid
+      ORDER BY version_number DESC
+      LIMIT 1
+    `);
+
+    let areaValidation: AreaValidationSummary;
+    if (!boundaryRow || boundaryRow.estimatedLandArea === null || boundaryRow.estimatedLandArea === undefined) {
+      areaValidation = {
+        hasRequiredArea: false,
+        requiredArea: null,
+        requiredUnit: null,
+        requiredAreaSqm: null,
+        verifiedAreaInRequiredUnit: null,
+        verifiedAreaSqm,
+        differenceSqm: null,
+        differenceInRequiredUnit: null,
+        toleranceSqm: AREA_COMPARISON_TOLERANCE_SQM,
+        status: 'NO_REQUIRED_AREA',
+        isMatched: true,
+      };
+    } else {
+      const requiredArea = Number(boundaryRow.estimatedLandArea);
+      const requiredUnit = String(boundaryRow.estimatedAreaUnit || 'SQ_M');
+      const requiredAreaSqm = Math.round(convertAreaToSqm(requiredArea, requiredUnit) * 1e6) / 1e6;
+      const differenceSqm = Math.round((verifiedAreaSqm - requiredAreaSqm) * 1e6) / 1e6;
+      const verifiedAreaInRequiredUnit =
+        Math.round(convertAreaFromSqm(verifiedAreaSqm, requiredUnit) * 1e4) / 1e4;
+      const differenceInRequiredUnit =
+        Math.round(convertAreaFromSqm(differenceSqm, requiredUnit) * 1e4) / 1e4;
+      const isMatched = Math.abs(differenceSqm) <= AREA_COMPARISON_TOLERANCE_SQM;
+      const status: AreaValidationSummary['status'] = isMatched
+        ? 'MATCHED'
+        : differenceSqm < 0
+        ? 'INSUFFICIENT'
+        : 'EXCEEDS';
+
+      areaValidation = {
+        hasRequiredArea: true,
+        requiredArea,
+        requiredUnit,
+        requiredAreaSqm,
+        verifiedAreaInRequiredUnit,
+        verifiedAreaSqm,
+        differenceSqm,
+        differenceInRequiredUnit,
+        toleranceSqm: AREA_COMPARISON_TOLERANCE_SQM,
+        status,
+        isMatched,
+      };
+
+      if (!isMatched) {
+        const directionText =
+          status === 'INSUFFICIENT'
+            ? `Verified affected area is insufficient by ${Math.abs(differenceSqm)} SQ_M (${Math.abs(differenceInRequiredUnit)} ${requiredUnit}). Additional verified land area is required.`
+            : `Verified affected area exceeds the project requirement by ${Math.abs(differenceSqm)} SQ_M (${Math.abs(differenceInRequiredUnit)} ${requiredUnit}).`;
+        unmetConditions.push({
+          code: 'AREA_MISMATCH',
+          message: `Required land area (${requiredArea} ${requiredUnit} = ${requiredAreaSqm} SQ_M) does not match total verified affected area (${verifiedAreaInRequiredUnit} ${requiredUnit} = ${verifiedAreaSqm} SQ_M). ${directionText}`,
+        });
       }
     }
 
@@ -395,6 +534,7 @@ export class FieldVerificationCompletionService {
       acceptedParcels,
       reportsAwaitingReview,
       unresolvedDiscrepancies,
+      areaValidation,
       unmetConditions,
     };
   }

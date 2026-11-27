@@ -214,6 +214,99 @@ export function CaseVerificationCompletionCard({
           </div>
         )}
 
+        {/* NLAMS-10: Required vs Verified Land-Area Comparison */}
+        {eligibility?.areaValidation?.hasRequiredArea && (
+          <div
+            style={{
+              background: eligibility.areaValidation.isMatched
+                ? 'rgba(16, 185, 129, 0.08)'
+                : 'rgba(239, 68, 68, 0.08)',
+              border: `1px solid ${
+                eligibility.areaValidation.isMatched
+                  ? 'rgba(16, 185, 129, 0.25)'
+                  : 'rgba(239, 68, 68, 0.3)'
+              }`,
+              borderRadius: '8px',
+              padding: '0.85rem 1rem',
+              marginBottom: '1rem',
+              fontSize: '0.8125rem',
+            }}
+            id="area-validation-summary-box"
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <strong style={{ color: '#f1f5f9' }}>Land Area Reconciliation (Required vs. Verified)</strong>
+              <span
+                style={{
+                  fontSize: '0.6875rem',
+                  fontWeight: 600,
+                  padding: '0.15rem 0.5rem',
+                  borderRadius: '9999px',
+                  background: eligibility.areaValidation.isMatched ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)',
+                  color: eligibility.areaValidation.isMatched ? '#34d399' : '#f87171',
+                }}
+                id="area-validation-status-badge"
+              >
+                {eligibility.areaValidation.status === 'MATCHED'
+                  ? '✓ Area Matched'
+                  : eligibility.areaValidation.status === 'INSUFFICIENT'
+                  ? '⚠ Insufficient Verified Area'
+                  : '⚠ Verified Area Exceeds Requirement'}
+              </span>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '0.75rem' }}>
+              <div>
+                <span style={{ fontSize: '0.6875rem', color: '#94a3b8', display: 'block' }}>Required Land Area</span>
+                <strong style={{ color: '#e2e8f0' }} id="area-validation-required">
+                  {eligibility.areaValidation.requiredArea} {eligibility.areaValidation.requiredUnit}
+                </strong>
+                <span style={{ fontSize: '0.7rem', color: '#94a3b8', display: 'block' }}>
+                  ({eligibility.areaValidation.requiredAreaSqm} SQ_M)
+                </span>
+              </div>
+
+              <div>
+                <span style={{ fontSize: '0.6875rem', color: '#94a3b8', display: 'block' }}>Total Verified Area</span>
+                <strong style={{ color: '#e2e8f0' }} id="area-validation-verified">
+                  {eligibility.areaValidation.verifiedAreaInRequiredUnit} {eligibility.areaValidation.requiredUnit}
+                </strong>
+                <span style={{ fontSize: '0.7rem', color: '#94a3b8', display: 'block' }}>
+                  ({eligibility.areaValidation.verifiedAreaSqm} SQ_M)
+                </span>
+              </div>
+
+              <div>
+                <span style={{ fontSize: '0.6875rem', color: '#94a3b8', display: 'block' }}>Difference</span>
+                <strong
+                  style={{ color: eligibility.areaValidation.isMatched ? '#34d399' : '#f87171' }}
+                  id="area-validation-difference"
+                >
+                  {eligibility.areaValidation.differenceInRequiredUnit !== null &&
+                  eligibility.areaValidation.differenceInRequiredUnit > 0
+                    ? `+${eligibility.areaValidation.differenceInRequiredUnit}`
+                    : eligibility.areaValidation.differenceInRequiredUnit}{' '}
+                  {eligibility.areaValidation.requiredUnit}
+                </strong>
+                <span style={{ fontSize: '0.7rem', color: '#94a3b8', display: 'block' }}>
+                  ({eligibility.areaValidation.differenceSqm !== null &&
+                  eligibility.areaValidation.differenceSqm > 0
+                    ? `+${eligibility.areaValidation.differenceSqm}`
+                    : eligibility.areaValidation.differenceSqm}{' '}
+                  SQ_M)
+                </span>
+              </div>
+            </div>
+
+            {!eligibility.areaValidation.isMatched && (
+              <p style={{ margin: '0.5rem 0 0 0', color: '#fca5a5', fontSize: '0.75rem' }}>
+                {eligibility.areaValidation.status === 'INSUFFICIENT'
+                  ? 'Additional verified parcel area is required before field verification can be completed.'
+                  : 'Total verified affected area exceeds the project land requirement. Review and adjust affected parcel measurements before completion.'}
+              </p>
+            )}
+          </div>
+        )}
+
         {/* Unmet Conditions Breakdown */}
         {eligibility && !isEligible && eligibility.unmetConditions.length > 0 && (
           <div
