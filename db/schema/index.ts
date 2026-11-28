@@ -8,6 +8,7 @@ export * from './administrative-units';
 export * from './user-assignments';
 export * from './sessions';
 export * from './implementing-agencies';
+export * from './user-implementing-agencies';
 export * from './projects';
 export * from './project-boundary-versions';
 export * from './acquisition-cases';

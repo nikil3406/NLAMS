@@ -20,8 +20,10 @@ export const createProjectSchema = z
       invalid_type_error: `Project type must be one of: ${PROJECT_TYPES.join(', ')}`,
     }),
     implementingAgencyId: z
-      .string({ required_error: 'Implementing agency is required' })
-      .uuid({ message: 'Invalid implementing agency UUID' }),
+      .string()
+      .uuid({ message: 'Invalid implementing agency UUID' })
+      .optional()
+      .nullable(),
     administrativeUnitId: z
       .string({ required_error: 'Administrative unit is required' })
       .uuid({ message: 'Invalid administrative unit UUID' }),

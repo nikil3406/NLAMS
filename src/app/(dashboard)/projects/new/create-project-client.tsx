@@ -8,9 +8,22 @@ import type { AdministrativeUnit } from '../../../../../db/schema/administrative
 import { PROJECT_TYPES } from '../../../../../db/schema/projects';
 import { ProjectBoundaryMap } from '../../../../components/maps/project-boundary-map';
 import type { GeoJsonGeometry } from '../../../../validators/spatial/boundary.schema';
+import type { ImplementingAgencyInfo } from '../../../../types/authorization';
 
-export function CreateProjectClient() {
+interface CreateProjectClientProps {
+  userRoles?: string[];
+  userImplementingAgency?: ImplementingAgencyInfo | null;
+}
+
+export function CreateProjectClient({
+  userRoles = [],
+  userImplementingAgency = null,
+}: CreateProjectClientProps) {
   const router = useRouter();
+  const isProjectOfficerOnly =
+    userRoles.includes('PROJECT_OFFICER') &&
+    !userRoles.includes('MINISTRY_ADMIN') &&
+    !userRoles.includes('SUPER_ADMIN');
 
   // Wizard Step: 1 = Basic Details, 2 = Location & Boundary, 3 = Review & Confirm
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3>(1);
@@ -19,7 +32,9 @@ export function CreateProjectClient() {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [projectType, setProjectType] = useState<string>(PROJECT_TYPES[0]);
-  const [implementingAgencyId, setImplementingAgencyId] = useState('');
+  const [implementingAgencyId, setImplementingAgencyId] = useState(
+    isProjectOfficerOnly ? (userImplementingAgency?.id ?? '') : ''
+  );
   const [administrativeUnitId, setAdministrativeUnitId] = useState('');
   const [landAcquisitionRequired, setLandAcquisitionRequired] = useState(true);
   const [estimatedCost, setEstimatedCost] = useState('');
@@ -87,7 +102,14 @@ export function CreateProjectClient() {
     return a.name.toLowerCase().includes(term) || a.code.toLowerCase().includes(term);
   });
 
-  const selectedAgency = agencies.find((a) => a.id === implementingAgencyId);
+  const selectedAgency = isProjectOfficerOnly && userImplementingAgency
+    ? {
+        id: userImplementingAgency.id,
+        code: userImplementingAgency.code,
+        name: userImplementingAgency.name,
+        agencyType: userImplementingAgency.agencyType,
+      }
+    : agencies.find((a) => a.id === implementingAgencyId);
   const selectedAdminUnit = adminUnits.find((u) => u.id === administrativeUnitId);
 
   // Formatting helpers for review step
@@ -515,6 +537,39 @@ export function CreateProjectClient() {
                   <label className="form-label" htmlFor="agency-selector">
                     Implementing Agency <span style={{ color: 'var(--status-danger)' }}>*</span>
                   </label>
+                  {isProjectOfficerOnly ? (
+                    userImplementingAgency ? (
+                      <div
+                        id="readonly-project-officer-agency"
+                        style={{
+                          border: '1px solid var(--border-color)',
+                          borderRadius: '8px',
+                          backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                          padding: '0.75rem 1rem',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: '0.875rem', color: '#fff' }}>
+                            {userImplementingAgency.name}
+                          </div>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                            Derived from your Project Officer Implementing Agency association
+                          </div>
+                        </div>
+                        <span className="role-tag-badge">{userImplementingAgency.code}</span>
+                      </div>
+                    ) : (
+                      <div className="alert-error-banner" id="missing-agency-banner">
+                        <span>
+                          Your Project Officer account is not associated with an active Implementing Agency. Please contact an administrator before creating a project.
+                        </span>
+                      </div>
+                    )
+                  ) : (
+                    <>
                   <div
                     style={{
                       border: '1px solid var(--border-color)',
@@ -612,10 +667,12 @@ export function CreateProjectClient() {
                       </div>
                     )}
                   </div>
-                  {selectedAgency && (
+                  {!isProjectOfficerOnly && selectedAgency && (
                     <div style={{ marginTop: '0.35rem', fontSize: '0.75rem', color: 'var(--status-active)' }}>
                       Selected: <strong>{selectedAgency.name}</strong> ({selectedAgency.code})
                     </div>
+                  )}
+                  </>
                   )}
                 </div>
 

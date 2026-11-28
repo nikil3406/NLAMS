@@ -7,6 +7,7 @@ import {
 import { acquisitionCaseRepository } from '../../repositories/acquisition-case.repository';
 import { permissionService } from '../authorization/permission.service';
 import { scopeService } from '../authorization/scope.service';
+import { authorizationService } from '../authorization/authorization.service';
 import {
   BadRequestError,
   NotFoundError,
@@ -44,11 +45,11 @@ export class ParcelService {
       throw new NotFoundError(`Acquisition case with ID '${caseId}' not found`);
     }
 
-    const inScope = await scopeService.isWithinAdministrativeScope(
-      userId,
-      acqCase.project.administrativeUnitId
-    );
-    if (!inScope) {
+    const [inScope, inAgencyScope] = await Promise.all([
+      scopeService.isWithinAdministrativeScope(userId, acqCase.project.administrativeUnitId),
+      authorizationService.canAccessProjectByAgency(userId, acqCase.project.implementingAgencyId),
+    ]);
+    if (!inScope || !inAgencyScope) {
       throw new NotFoundError(`Acquisition case with ID '${caseId}' not found`);
     }
 

@@ -417,82 +417,31 @@ export function EditProjectClient({ projectId, currentUserId }: EditProjectClien
           {/* Implementing Agency Searchable Selector */}
           <div className="form-group">
             <label className="form-label" htmlFor="edit-agency-selector">
-              Implementing Agency <span style={{ color: 'var(--status-danger)' }}>*</span>
+              Implementing Agency
             </label>
             <div
+              id="edit-agency-readonly"
               style={{
                 border: '1px solid var(--border-color)',
                 borderRadius: '8px',
-                backgroundColor: 'var(--bg-input)',
-                padding: '0.5rem 0.75rem',
+                backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                padding: '0.75rem 1rem',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <input
-                  type="text"
-                  id="edit-agency-selector"
-                  className="search-input"
-                  style={{ border: 'none', background: 'transparent', padding: '0.25rem 0.5rem', width: '100%' }}
-                  placeholder="Search active government agencies..."
-                  value={agencySearch || (selectedAgency ? `${selectedAgency.name} (${selectedAgency.code})` : '')}
-                  onFocus={() => {
-                    setIsAgencyDropdownOpen(true);
-                    setAgencySearch('');
-                  }}
-                  onChange={(e) => {
-                    setAgencySearch(e.target.value);
-                    setIsAgencyDropdownOpen(true);
-                  }}
-                />
-                {selectedAgency && (
-                  <button
-                    type="button"
-                    className="search-clear-btn"
-                    onClick={() => {
-                      setImplementingAgencyId('');
-                      setAgencySearch('');
-                    }}
-                    title="Clear selection"
-                  >
-                    ✕
-                  </button>
-                )}
-              </div>
-
-              {isAgencyDropdownOpen && (
-                <div
-                  style={{
-                    marginTop: '0.5rem',
-                    maxHeight: '200px',
-                    overflowY: 'auto',
-                    borderTop: '1px solid var(--border-subtle)',
-                    paddingTop: '0.5rem',
-                  }}
-                >
-                  {filteredAgencies.map((agency) => (
-                    <div
-                      key={agency.id}
-                      onClick={() => {
-                        setImplementingAgencyId(agency.id);
-                        setAgencySearch('');
-                        setIsAgencyDropdownOpen(false);
-                      }}
-                      style={{
-                        padding: '0.5rem 0.75rem',
-                        borderRadius: '6px',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        backgroundColor: agency.id === implementingAgencyId ? 'var(--accent-subtle)' : 'transparent',
-                      }}
-                    >
-                      <span style={{ fontSize: '0.8125rem', color: '#fff' }}>{agency.name}</span>
-                      <span className="role-tag-badge">{agency.code}</span>
-                    </div>
-                  ))}
+              <div>
+                <div style={{ fontWeight: 600, fontSize: '0.875rem', color: '#fff' }}>
+                  {selectedAgency ? selectedAgency.name : project?.implementingAgency?.name || 'Assigned Agency'}
                 </div>
-              )}
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                  Implementing Agency cannot be reassigned through ordinary project editing
+                </div>
+              </div>
+              <span className="role-tag-badge">
+                {selectedAgency ? selectedAgency.code : project?.implementingAgency?.code || 'AGENCY'}
+              </span>
             </div>
           </div>
 

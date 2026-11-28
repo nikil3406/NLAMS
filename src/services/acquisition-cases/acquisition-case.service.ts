@@ -12,6 +12,7 @@ import {
 import { projectRepository } from '../../repositories/project.repository';
 import { permissionService } from '../authorization/permission.service';
 import { scopeService } from '../authorization/scope.service';
+import { authorizationService } from '../authorization/authorization.service';
 import {
   BadRequestError,
   NotFoundError,
@@ -157,8 +158,14 @@ export class AcquisitionCaseService {
     // 1. Permission check
     await permissionService.requirePermission(userId, 'ACQUISITION_CASE_VIEW');
 
-    const allowedUnitIds = await scopeService.getAllowedUnitIdsForUser(userId);
-    if (allowedUnitIds !== undefined && allowedUnitIds.length === 0) {
+    const [allowedUnitIds, agencyScope] = await Promise.all([
+      scopeService.getAllowedUnitIdsForUser(userId),
+      authorizationService.getAgencyScopeForUser(userId),
+    ]);
+    if (
+      (allowedUnitIds !== undefined && allowedUnitIds.length === 0) ||
+      agencyScope === null
+    ) {
       return {
         data: [],
         pagination: {
@@ -178,6 +185,7 @@ export class AcquisitionCaseService {
       search: query.search,
       status: query.status,
       projectId: query.projectId,
+      implementingAgencyId: agencyScope ?? undefined,
       administrativeUnitIds: allowedUnitIds,
       limit,
       offset,
@@ -214,12 +222,12 @@ export class AcquisitionCaseService {
       throw new NotFoundError(`Acquisition case with ID '${id}' not found`);
     }
 
-    // 2. Administrative scope check (404 to avoid leaking existence of out-of-scope case)
-    const inScope = await scopeService.isWithinAdministrativeScope(
-      userId,
-      acqCase.project.administrativeUnitId
-    );
-    if (!inScope) {
+    // 2. Administrative scope & organization-scope check (404 to avoid leaking existence of out-of-scope case)
+    const [inScope, inAgencyScope] = await Promise.all([
+      scopeService.isWithinAdministrativeScope(userId, acqCase.project.administrativeUnitId),
+      authorizationService.canAccessProjectByAgency(userId, acqCase.project.implementingAgencyId),
+    ]);
+    if (!inScope || !inAgencyScope) {
       throw new NotFoundError(`Acquisition case with ID '${id}' not found`);
     }
 

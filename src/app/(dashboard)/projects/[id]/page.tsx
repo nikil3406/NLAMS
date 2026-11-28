@@ -31,6 +31,7 @@ export default async function ProjectDetailsPage({ params }: PageProps) {
       currentUserId={user.id}
       userPermissions={userPermissions}
       userRoles={userRoles}
+      userImplementingAgencyId={authContext?.implementingAgency?.id ?? null}
       isSuperAdmin={isSuperAdmin}
     />
   );

@@ -35,6 +35,7 @@ export interface ProposalFilterOptions {
   status?: string;
   projectId?: string;
   acquisitionCaseId?: string;
+  implementingAgencyId?: string;
   scopedUnitIds?: string[];
   limit?: number;
   offset?: number;
@@ -650,6 +651,12 @@ export class AcquisitionProposalRepository {
       );
     }
 
+    if (options.implementingAgencyId) {
+      conditions.push(
+        eq(acquisitionProposals.implementingAgencyId, options.implementingAgencyId)
+      );
+    }
+
     if (options.scopedUnitIds && options.scopedUnitIds.length > 0) {
       conditions.push(
         inArray(projects.administrativeUnitId, options.scopedUnitIds)
@@ -756,6 +763,12 @@ export class AcquisitionProposalRepository {
     if (options.acquisitionCaseId) {
       conditions.push(
         eq(acquisitionProposals.acquisitionCaseId, options.acquisitionCaseId)
+      );
+    }
+
+    if (options.implementingAgencyId) {
+      conditions.push(
+        eq(acquisitionProposals.implementingAgencyId, options.implementingAgencyId)
       );
     }
 

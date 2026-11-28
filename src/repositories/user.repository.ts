@@ -9,6 +9,8 @@ import {
   authorityUserAssignments,
   competentAuthorities,
 } from '../../db/schema/competent-authorities';
+import { implementingAgencies } from '../../db/schema/implementing-agencies';
+import { userImplementingAgencyAssignments } from '../../db/schema/user-implementing-agencies';
 
 export interface UserAssignmentDetail {
   id: string;
@@ -37,6 +39,20 @@ export interface UserAuthorityAssignmentDetail {
   createdAt: Date;
 }
 
+export interface UserImplementingAgencyAssignmentDetail {
+  id: string;
+  implementingAgencyId: string;
+  agencyCode: string;
+  agencyName: string;
+  agencyType: string;
+  agencyStatus: string;
+  status: 'ACTIVE' | 'INACTIVE';
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+  assignedBy: string;
+  createdAt: Date;
+}
+
 export interface UserWithDetails {
   id: string;
   name: string;
@@ -48,6 +64,14 @@ export interface UserWithDetails {
   roles: Role[];
   assignments: UserAssignmentDetail[];
   authorityAssignments?: UserAuthorityAssignmentDetail[];
+  implementingAgencyAssignments?: UserImplementingAgencyAssignmentDetail[];
+  activeImplementingAgency?: {
+    id: string;
+    code: string;
+    name: string;
+    agencyType: string;
+    status: string;
+  } | null;
 }
 
 export interface ListUsersRepoOptions {
@@ -77,6 +101,7 @@ export interface CreateUserData {
   roleId: string;
   administrativeUnitId: string;
   competentAuthorityId?: string | null;
+  implementingAgencyId?: string | null;
   assignedBy: string;
 }
 
@@ -140,7 +165,7 @@ export class UserRepository {
       return null;
     }
 
-    const [userRolesList, assignmentsList, authorityAssignmentsList] = await Promise.all([
+    const [userRolesList, assignmentsList, authorityAssignmentsList, agencyAssignmentsList] = await Promise.all([
       db
         .select({
           id: roles.id,
@@ -195,7 +220,12 @@ export class UserRepository {
         )
         .where(eq(authorityUserAssignments.userId, id))
         .orderBy(desc(authorityUserAssignments.createdAt)),
+      this.findAgencyAssignmentsByUserId(id),
     ]);
+
+    const activeAgencyAssign = agencyAssignmentsList.find(
+      (a) => a.status === 'ACTIVE' && a.agencyStatus === 'ACTIVE'
+    );
 
     return {
       id: user.id,
@@ -208,6 +238,16 @@ export class UserRepository {
       roles: userRolesList,
       assignments: assignmentsList,
       authorityAssignments: authorityAssignmentsList as UserAuthorityAssignmentDetail[],
+      implementingAgencyAssignments: agencyAssignmentsList,
+      activeImplementingAgency: activeAgencyAssign
+        ? {
+            id: activeAgencyAssign.implementingAgencyId,
+            code: activeAgencyAssign.agencyCode,
+            name: activeAgencyAssign.agencyName,
+            agencyType: activeAgencyAssign.agencyType,
+            status: activeAgencyAssign.agencyStatus,
+          }
+        : null,
     };
   }
 
@@ -502,6 +542,43 @@ export class UserRepository {
         }
       }
 
+      // 3c. Insert initial Implementing Agency assignment if provided
+      let createdAgencyAssignment: UserImplementingAgencyAssignmentDetail | null = null;
+      if (data.implementingAgencyId) {
+        const [agencyAssign] = await tx
+          .insert(userImplementingAgencyAssignments)
+          .values({
+            implementingAgencyId: data.implementingAgencyId,
+            userId: user.id,
+            assignedBy: data.assignedBy,
+            effectiveFrom: today,
+            status: 'ACTIVE',
+          })
+          .returning();
+
+        const [agency] = await tx
+          .select()
+          .from(implementingAgencies)
+          .where(eq(implementingAgencies.id, data.implementingAgencyId))
+          .limit(1);
+
+        if (agency && agencyAssign) {
+          createdAgencyAssignment = {
+            id: agencyAssign.id,
+            implementingAgencyId: agency.id,
+            agencyCode: agency.code,
+            agencyName: agency.name,
+            agencyType: agency.agencyType,
+            agencyStatus: agency.status,
+            status: agencyAssign.status as 'ACTIVE' | 'INACTIVE',
+            effectiveFrom: agencyAssign.effectiveFrom,
+            effectiveUntil: agencyAssign.effectiveUntil,
+            assignedBy: agencyAssign.assignedBy,
+            createdAt: agencyAssign.createdAt,
+          };
+        }
+      }
+
       // 4. Fetch the role and administrative unit details for the return value
       const [role] = await tx
         .select()
@@ -552,6 +629,16 @@ export class UserRepository {
             ]
           : [],
         authorityAssignments: createdAuthAssignment ? [createdAuthAssignment] : [],
+        implementingAgencyAssignments: createdAgencyAssignment ? [createdAgencyAssignment] : [],
+        activeImplementingAgency: createdAgencyAssignment
+          ? {
+              id: createdAgencyAssignment.implementingAgencyId,
+              code: createdAgencyAssignment.agencyCode,
+              name: createdAgencyAssignment.agencyName,
+              agencyType: createdAgencyAssignment.agencyType,
+              status: createdAgencyAssignment.agencyStatus,
+            }
+          : null,
       };
     });
   }
@@ -749,6 +836,154 @@ export class UserRepository {
         authorityName: auth.authorityName,
         designation: auth.designation,
         authorityLevel: auth.authorityLevel,
+        status: newAssign.status as 'ACTIVE' | 'INACTIVE',
+        effectiveFrom: newAssign.effectiveFrom,
+        effectiveUntil: newAssign.effectiveUntil,
+        assignedBy: newAssign.assignedBy,
+        createdAt: newAssign.createdAt,
+      };
+    });
+  }
+
+  /**
+   * Retrieves all Implementing Agency assignments (active and historical) for a user.
+   */
+  async findAgencyAssignmentsByUserId(
+    userId: string
+  ): Promise<UserImplementingAgencyAssignmentDetail[]> {
+    const rows = await db
+      .select({
+        id: userImplementingAgencyAssignments.id,
+        implementingAgencyId: implementingAgencies.id,
+        agencyCode: implementingAgencies.code,
+        agencyName: implementingAgencies.name,
+        agencyType: implementingAgencies.agencyType,
+        agencyStatus: implementingAgencies.status,
+        status: userImplementingAgencyAssignments.status,
+        effectiveFrom: userImplementingAgencyAssignments.effectiveFrom,
+        effectiveUntil: userImplementingAgencyAssignments.effectiveUntil,
+        assignedBy: userImplementingAgencyAssignments.assignedBy,
+        createdAt: userImplementingAgencyAssignments.createdAt,
+      })
+      .from(userImplementingAgencyAssignments)
+      .innerJoin(
+        implementingAgencies,
+        eq(userImplementingAgencyAssignments.implementingAgencyId, implementingAgencies.id)
+      )
+      .where(eq(userImplementingAgencyAssignments.userId, userId))
+      .orderBy(desc(userImplementingAgencyAssignments.createdAt));
+
+    return rows as UserImplementingAgencyAssignmentDetail[];
+  }
+
+  /**
+   * Retrieves the currently ACTIVE Implementing Agency assignment for a user, if any.
+   */
+  async findActiveAgencyAssignmentByUserId(
+    userId: string
+  ): Promise<UserImplementingAgencyAssignmentDetail | null> {
+    const [row] = await db
+      .select({
+        id: userImplementingAgencyAssignments.id,
+        implementingAgencyId: implementingAgencies.id,
+        agencyCode: implementingAgencies.code,
+        agencyName: implementingAgencies.name,
+        agencyType: implementingAgencies.agencyType,
+        agencyStatus: implementingAgencies.status,
+        status: userImplementingAgencyAssignments.status,
+        effectiveFrom: userImplementingAgencyAssignments.effectiveFrom,
+        effectiveUntil: userImplementingAgencyAssignments.effectiveUntil,
+        assignedBy: userImplementingAgencyAssignments.assignedBy,
+        createdAt: userImplementingAgencyAssignments.createdAt,
+      })
+      .from(userImplementingAgencyAssignments)
+      .innerJoin(
+        implementingAgencies,
+        eq(userImplementingAgencyAssignments.implementingAgencyId, implementingAgencies.id)
+      )
+      .where(
+        and(
+          eq(userImplementingAgencyAssignments.userId, userId),
+          eq(userImplementingAgencyAssignments.status, 'ACTIVE')
+        )
+      )
+      .limit(1);
+
+    return (row as UserImplementingAgencyAssignmentDetail) ?? null;
+  }
+
+  /**
+   * Deactivates all active Implementing Agency assignments for a user without deleting history.
+   */
+  async deactivateActiveAgencyAssignmentsForUser(userId: string): Promise<void> {
+    const today = new Date().toISOString().split('T')[0];
+    await db
+      .update(userImplementingAgencyAssignments)
+      .set({
+        status: 'INACTIVE',
+        effectiveUntil: today,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(userImplementingAgencyAssignments.userId, userId),
+          eq(userImplementingAgencyAssignments.status, 'ACTIVE')
+        )
+      );
+  }
+
+  /**
+   * Assigns or updates a user's Implementing Agency assignment transactionally.
+   * Preserves history by deactivating any existing active assignment for that user.
+   */
+  async reassignUserImplementingAgency(
+    userId: string,
+    implementingAgencyId: string,
+    assignedBy: string,
+    effectiveFrom?: string,
+    effectiveUntil?: string | null
+  ): Promise<UserImplementingAgencyAssignmentDetail> {
+    const today = effectiveFrom || new Date().toISOString().split('T')[0];
+    return await db.transaction(async (tx) => {
+      await tx
+        .update(userImplementingAgencyAssignments)
+        .set({
+          status: 'INACTIVE',
+          effectiveUntil: today,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(userImplementingAgencyAssignments.userId, userId),
+            eq(userImplementingAgencyAssignments.status, 'ACTIVE')
+          )
+        );
+
+      const [newAssign] = await tx
+        .insert(userImplementingAgencyAssignments)
+        .values({
+          implementingAgencyId,
+          userId,
+          assignedBy,
+          effectiveFrom: today,
+          effectiveUntil: effectiveUntil || null,
+          status: 'ACTIVE',
+        })
+        .returning();
+
+      const [agency] = await tx
+        .select()
+        .from(implementingAgencies)
+        .where(eq(implementingAgencies.id, implementingAgencyId))
+        .limit(1);
+
+      return {
+        id: newAssign.id,
+        implementingAgencyId: agency.id,
+        agencyCode: agency.code,
+        agencyName: agency.name,
+        agencyType: agency.agencyType,
+        agencyStatus: agency.status,
         status: newAssign.status as 'ACTIVE' | 'INACTIVE',
         effectiveFrom: newAssign.effectiveFrom,
         effectiveUntil: newAssign.effectiveUntil,

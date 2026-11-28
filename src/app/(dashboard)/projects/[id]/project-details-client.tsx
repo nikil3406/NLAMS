@@ -11,6 +11,7 @@ interface ProjectDetailsClientProps {
   currentUserId: string;
   userPermissions: string[];
   userRoles?: string[];
+  userImplementingAgencyId?: string | null;
   isSuperAdmin: boolean;
 }
 
@@ -19,6 +20,7 @@ export function ProjectDetailsClient({
   currentUserId,
   userPermissions,
   userRoles = [],
+  userImplementingAgencyId = null,
   isSuperAdmin,
 }: ProjectDetailsClientProps) {
 
@@ -285,7 +287,9 @@ export function ProjectDetailsClient({
     requiredCounterpartRole = 'PROJECT_OFFICER';
   }
   const holdsCounterpartRole = requiredCounterpartRole
-    ? userRoles.includes(requiredCounterpartRole)
+    ? userRoles.includes(requiredCounterpartRole) &&
+      (requiredCounterpartRole !== 'PROJECT_OFFICER' ||
+        userImplementingAgencyId === project.implementingAgencyId)
     : true;
   const isEligibleReviewer = !isCreator && holdsCounterpartRole;
 

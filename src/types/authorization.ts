@@ -20,6 +20,17 @@ export interface AdministrativeAssignmentInfo {
 }
 
 /**
+ * Representation of an active Implementing Agency association for client/service consumption.
+ */
+export interface ImplementingAgencyInfo {
+  id: string;
+  code: string;
+  name: string;
+  agencyType: string;
+  status: string;
+}
+
+/**
  * Consolidated authorization context resolved for an authenticated user.
  */
 export interface UserAuthorizationContext {
@@ -27,6 +38,7 @@ export interface UserAuthorizationContext {
   roles: string[];
   permissions: string[];
   assignments: AdministrativeAssignmentInfo[];
+  implementingAgency: ImplementingAgencyInfo | null;
   isSuperAdmin: boolean;
 }
 

@@ -27,6 +27,7 @@ import { competentAuthorityService } from '../competent-authorities/competent-au
 type TransactionClient = Parameters<Parameters<typeof db.transaction>[0]>[0];
 import { permissionService } from '../authorization/permission.service';
 import { scopeService } from '../authorization/scope.service';
+import { authorizationService } from '../authorization/authorization.service';
 import {
   BadRequestError,
   ConflictError,
@@ -61,7 +62,10 @@ export class AcquisitionProposalService {
    *
    * Super Admin and Ministry Admin do not automatically gain ordinary proposal workflow privileges.
    */
-  async assertAuthorizedImplementingAgency(userId: string): Promise<void> {
+  async assertAuthorizedImplementingAgency(
+    userId: string,
+    targetImplementingAgencyId?: string
+  ): Promise<void> {
     const user = await userRepository.findUserById(userId);
     if (!user) {
       throw new ForbiddenError('Forbidden: User not found');
@@ -81,6 +85,15 @@ export class AcquisitionProposalService {
       throw new ForbiddenError(
         'Forbidden: Only an authorized Implementing Agency user may manage acquisition proposals'
       );
+    }
+
+    if (callerRoles.includes('PROJECT_OFFICER')) {
+      const userAgency = await authorizationService.requireProjectOfficerActiveAgency(userId);
+      if (targetImplementingAgencyId && userAgency.id !== targetImplementingAgencyId) {
+        throw new ForbiddenError(
+          'Forbidden: You are not associated with the Implementing Agency of this project'
+        );
+      }
     }
   }
 
@@ -126,7 +139,7 @@ export class AcquisitionProposalService {
       );
     }
 
-    // 3. Administrative scope verification over linked project's administrative unit
+    // 3. Administrative scope & Implementing Agency verification over linked project
     const inScope = await scopeService.isWithinAdministrativeScope(
       userId,
       acqCase.project.administrativeUnitId
@@ -136,6 +149,11 @@ export class AcquisitionProposalService {
         'Forbidden: Linked project is outside your authorized administrative scope'
       );
     }
+
+    await this.assertAuthorizedImplementingAgency(
+      userId,
+      acqCase.project.implementingAgencyId
+    );
 
     // 4. Pre-check for duplicate proposal on the case
     const existingProposal =
@@ -333,8 +351,8 @@ export class AcquisitionProposalService {
       );
     }
 
-    // Ensure creator is an active Implementing Agency user
-    await this.assertAuthorizedImplementingAgency(userId);
+    // Ensure creator is an active Implementing Agency user matching this proposal's agency
+    await this.assertAuthorizedImplementingAgency(userId, existing.implementingAgencyId);
 
     if (input.competentAuthorityId) {
       const eligible =
@@ -514,6 +532,9 @@ export class AcquisitionProposalService {
     // 2. Fetch proposal with details and check scope
     const proposal = await this.getProposalById(id, userId);
 
+    // 2b. Verify Implementing Agency association matches proposal's agency
+    await this.assertAuthorizedImplementingAgency(userId, proposal.implementingAgencyId);
+
     // 3. Workflow status check: only DRAFT proposals with DRAFT version can be submitted
     if (proposal.currentStatus !== 'DRAFT') {
       throw new BadRequestError(
@@ -681,6 +702,9 @@ export class AcquisitionProposalService {
     // 2. Fetch proposal with details and check scope
     const proposal = await this.getProposalById(id, userId);
 
+    // 2b. Verify Implementing Agency association matches proposal's agency
+    await this.assertAuthorizedImplementingAgency(userId, proposal.implementingAgencyId);
+
     // 3. Workflow status check: only proposals with CORRECTION_REQUESTED status are eligible
     if (proposal.currentStatus !== 'CORRECTION_REQUESTED') {
       throw new BadRequestError(
@@ -827,6 +851,17 @@ export class AcquisitionProposalService {
       throw new NotFoundError(`Acquisition proposal with ID '${id}' not found`);
     }
 
+    // Check Implementing Agency scope for PROJECT_OFFICER users
+    const inAgencyScope = await authorizationService.canAccessProjectByAgency(
+      userId,
+      proposal.implementingAgencyId
+    );
+    if (!inAgencyScope) {
+      throw new ForbiddenError(
+        'Forbidden: Proposal is outside your authorized Implementing Agency scope'
+      );
+    }
+
     // Check scope accessibility
     const isSuper = await permissionService.isSuperAdmin(userId);
     if (!isSuper && proposal.createdBy !== userId) {
@@ -870,17 +905,31 @@ export class AcquisitionProposalService {
     query: AcquisitionProposalQueryInput,
     userId: string
   ): Promise<PaginatedProposalsResult> {
-    const scopedUnitIds = await scopeService.getAllowedUnitIdsForUser(userId);
+    const [scopedUnitIds, agencyScope] = await Promise.all([
+      scopeService.getAllowedUnitIdsForUser(userId),
+      authorizationService.getAgencyScopeForUser(userId),
+    ]);
 
     const page = Math.max(1, query.page ?? 1);
     const limit = Math.min(100, Math.max(1, query.limit ?? 20));
     const offset = (page - 1) * limit;
+
+    if (
+      (scopedUnitIds !== undefined && scopedUnitIds.length === 0) ||
+      agencyScope === null
+    ) {
+      return {
+        data: [],
+        pagination: { total: 0, page, limit, totalPages: 1 },
+      };
+    }
 
     const filterOptions: ProposalFilterOptions = {
       search: query.search,
       status: query.status,
       projectId: query.projectId,
       acquisitionCaseId: query.acquisitionCaseId,
+      implementingAgencyId: agencyScope ?? undefined,
       scopedUnitIds,
       limit,
       offset,
@@ -914,7 +963,17 @@ export class AcquisitionProposalService {
   async listEligibleCasesForProposal(userId: string) {
     await this.assertAuthorizedImplementingAgency(userId);
 
-    const scopedUnitIds = await scopeService.getAllowedUnitIdsForUser(userId);
+    const [scopedUnitIds, agencyScope] = await Promise.all([
+      scopeService.getAllowedUnitIdsForUser(userId),
+      authorizationService.getAgencyScopeForUser(userId),
+    ]);
+
+    if (
+      (scopedUnitIds !== undefined && scopedUnitIds.length === 0) ||
+      agencyScope === null
+    ) {
+      return [];
+    }
 
     // Query cases from db that don't have a proposal yet
     // and have at least one approved inventory
@@ -924,6 +983,9 @@ export class AcquisitionProposalService {
     ];
     if (scopedUnitIds && scopedUnitIds.length > 0) {
       conditions.push(inArray(projects.administrativeUnitId, scopedUnitIds));
+    }
+    if (agencyScope) {
+      conditions.push(eq(projects.implementingAgencyId, agencyScope));
     }
 
     const candidateCases = await db

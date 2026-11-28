@@ -30,6 +30,11 @@ export const createUserSchema = z.object({
     .uuid('Invalid Competent Authority ID format')
     .optional()
     .nullable(),
+  implementingAgencyId: z
+    .string()
+    .uuid('Invalid Implementing Agency ID format')
+    .optional()
+    .nullable(),
   password: z
     .string()
     .min(8, 'Password must be at least 8 characters')

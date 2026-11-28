@@ -44,6 +44,7 @@ export interface InventoryWithDetails extends VerifiedLandInventory {
       id: string;
       projectCode: string;
       name: string;
+      implementingAgencyId: string;
       administrativeUnitId: string;
       administrativeUnit: {
         id: string;
@@ -282,6 +283,7 @@ export class VerifiedLandInventoryRepository {
         projectId: acquisitionCases.projectId,
         projectCode: projects.projectCode,
         projectName: projects.name,
+        implementingAgencyId: projects.implementingAgencyId,
         administrativeUnitId: projects.administrativeUnitId,
         adminUnitId: administrativeUnits.id,
         adminUnitName: administrativeUnits.name,
@@ -307,6 +309,7 @@ export class VerifiedLandInventoryRepository {
             id: caseData.projectId,
             projectCode: caseData.projectCode,
             name: caseData.projectName,
+            implementingAgencyId: caseData.implementingAgencyId,
             administrativeUnitId: caseData.administrativeUnitId,
             administrativeUnit: {
               id: caseData.adminUnitId,
@@ -419,6 +422,7 @@ export class VerifiedLandInventoryRepository {
         projectId: acquisitionCases.projectId,
         projectCode: projects.projectCode,
         projectName: projects.name,
+        implementingAgencyId: projects.implementingAgencyId,
         administrativeUnitId: projects.administrativeUnitId,
         adminUnitId: administrativeUnits.id,
         adminUnitName: administrativeUnits.name,
@@ -471,12 +475,16 @@ export class VerifiedLandInventoryRepository {
    */
   async getInventorySummaryMetrics(
     scopedUnitIds?: string[],
-    txClient?: TransactionClient
+    txClient?: TransactionClient,
+    implementingAgencyId?: string
   ): Promise<InventorySummaryMetrics> {
     const executor = (txClient ?? db) as typeof db;
     const conditions = [];
     if (scopedUnitIds && scopedUnitIds.length > 0) {
       conditions.push(inArray(projects.administrativeUnitId, scopedUnitIds));
+    }
+    if (implementingAgencyId) {
+      conditions.push(eq(projects.implementingAgencyId, implementingAgencyId));
     }
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
@@ -557,6 +565,10 @@ export class VerifiedLandInventoryRepository {
       conditions.push(inArray(projects.administrativeUnitId, options.scopedUnitIds));
     }
 
+    if (options.implementingAgencyId) {
+      conditions.push(eq(projects.implementingAgencyId, options.implementingAgencyId));
+    }
+
     if (options.status) {
       const st = options.status.toUpperCase();
       if (st === 'PENDING_REVIEW') {
@@ -612,6 +624,7 @@ export class VerifiedLandInventoryRepository {
         projectId: acquisitionCases.projectId,
         projectCode: projects.projectCode,
         projectName: projects.name,
+        implementingAgencyId: projects.implementingAgencyId,
         administrativeUnitId: projects.administrativeUnitId,
         adminUnitId: administrativeUnits.id,
         adminUnitName: administrativeUnits.name,
@@ -672,6 +685,7 @@ export class VerifiedLandInventoryRepository {
 
 export interface InventoryListFilterOptions {
   scopedUnitIds?: string[];
+  implementingAgencyId?: string;
   status?: string;
   search?: string;
   limit?: number;

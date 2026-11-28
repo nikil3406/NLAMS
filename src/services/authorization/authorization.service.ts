@@ -3,7 +3,11 @@ import { userRepository } from '../../repositories/user.repository';
 import { userAssignmentRepository } from '../../repositories/user-assignment.repository';
 import { permissionService } from './permission.service';
 import { scopeService } from './scope.service';
-import { ForbiddenError, type UserAuthorizationContext } from '../../types/authorization';
+import {
+  ForbiddenError,
+  type ImplementingAgencyInfo,
+  type UserAuthorizationContext,
+} from '../../types/authorization';
 import { sanitizeUser } from '../auth/session.service';
 
 /**
@@ -42,10 +46,11 @@ export class AuthorizationService {
       return null;
     }
 
-    const [roles, permissions, assignmentsWithUnits] = await Promise.all([
+    const [roles, permissions, assignmentsWithUnits, activeAgencyAssign] = await Promise.all([
       permissionService.getUserRoles(userId),
       permissionService.getUserPermissions(userId),
       userAssignmentRepository.findActiveAssignmentsWithUnitsByUserId(userId),
+      userRepository.findActiveAgencyAssignmentByUserId(userId),
     ]);
 
     const assignments = assignmentsWithUnits.map(({ assignment, administrativeUnit }) => ({
@@ -59,6 +64,17 @@ export class AuthorizationService {
       endDate: assignment.endDate,
     }));
 
+    const implementingAgency: ImplementingAgencyInfo | null =
+      activeAgencyAssign && activeAgencyAssign.agencyStatus === 'ACTIVE'
+        ? {
+            id: activeAgencyAssign.implementingAgencyId,
+            code: activeAgencyAssign.agencyCode,
+            name: activeAgencyAssign.agencyName,
+            agencyType: activeAgencyAssign.agencyType,
+            status: activeAgencyAssign.agencyStatus,
+          }
+        : null;
+
     const isSuperAdmin = roles.includes('SUPER_ADMIN');
 
     return {
@@ -66,9 +82,77 @@ export class AuthorizationService {
       roles,
       permissions,
       assignments,
+      implementingAgency,
       isSuperAdmin,
     };
   });
+
+  /**
+   * Resolves the Implementing Agency scope for a user:
+   * - Returns `undefined` if the user is NOT organization-scoped (SUPER_ADMIN, MINISTRY_ADMIN,
+   *   LAND_OFFICER, FIELD_OFFICER, COMPETENT_AUTHORITY).
+   * - Returns `string` (agency ID) if the user is a PROJECT_OFFICER with an active agency.
+   * - Returns `null` if the user is a PROJECT_OFFICER without an active agency (empty scope).
+   */
+  getAgencyScopeForUser = cache(async (userId: string): Promise<string | null | undefined> => {
+    const roles = await permissionService.getUserRoles(userId);
+    if (roles.includes('SUPER_ADMIN') || roles.includes('MINISTRY_ADMIN')) {
+      return undefined;
+    }
+
+    if (!roles.includes('PROJECT_OFFICER')) {
+      return undefined;
+    }
+
+    const activeAssign = await userRepository.findActiveAgencyAssignmentByUserId(userId);
+    if (!activeAssign || activeAssign.agencyStatus !== 'ACTIVE') {
+      return null;
+    }
+
+    return activeAssign.implementingAgencyId;
+  });
+
+  /**
+   * Asserts that a Project Officer has an active Implementing Agency association
+   * and returns the agency info. Throws ForbiddenError if missing or inactive.
+   */
+  async requireProjectOfficerActiveAgency(userId: string): Promise<ImplementingAgencyInfo> {
+    const activeAssign = await userRepository.findActiveAgencyAssignmentByUserId(userId);
+    if (!activeAssign) {
+      throw new ForbiddenError(
+        'Forbidden: Your Project Officer account is not associated with an Implementing Agency. Please contact an administrator.'
+      );
+    }
+    if (activeAssign.agencyStatus !== 'ACTIVE') {
+      throw new ForbiddenError(
+        `Forbidden: Your associated Implementing Agency '${activeAssign.agencyName}' (${activeAssign.agencyCode}) is inactive.`
+      );
+    }
+    return {
+      id: activeAssign.implementingAgencyId,
+      code: activeAssign.agencyCode,
+      name: activeAssign.agencyName,
+      agencyType: activeAssign.agencyType,
+      status: activeAssign.agencyStatus,
+    };
+  }
+
+  /**
+   * Checks whether a user is authorized by Implementing Agency to access a project's records.
+   */
+  async canAccessProjectByAgency(
+    userId: string,
+    projectImplementingAgencyId: string
+  ): Promise<boolean> {
+    const agencyScope = await this.getAgencyScopeForUser(userId);
+    if (agencyScope === undefined) {
+      return true;
+    }
+    if (agencyScope === null) {
+      return false;
+    }
+    return agencyScope === projectImplementingAgencyId;
+  }
 
   /**
    * Evaluates whether an acting user has authority to manage a target user.

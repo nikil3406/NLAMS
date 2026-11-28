@@ -209,6 +209,11 @@ export class UserRoleService {
       await userRepository.deactivateActiveAuthorityAssignmentsForUser(targetUserId);
     }
 
+    // If PROJECT_OFFICER role is revoked, deactivate active Implementing Agency assignments without destroying history
+    if (role.name === 'PROJECT_OFFICER') {
+      await userRepository.deactivateActiveAgencyAssignmentsForUser(targetUserId);
+    }
+
     // 9. Return updated user
     const updated = await userRepository.findUserDetailsById(targetUserId);
     if (!updated) {

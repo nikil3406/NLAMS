@@ -49,6 +49,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           roles: authContext.roles,
           permissions: authContext.permissions,
           assignments: authContext.assignments,
+          implementingAgency: authContext.implementingAgency,
           isSuperAdmin: authContext.isSuperAdmin,
         },
       },

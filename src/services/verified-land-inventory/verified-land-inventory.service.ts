@@ -15,6 +15,7 @@ import { acquisitionCaseRepository } from '../../repositories/acquisition-case.r
 import { userRepository } from '../../repositories/user.repository';
 import { permissionService } from '../authorization/permission.service';
 import { scopeService } from '../authorization/scope.service';
+import { authorizationService } from '../authorization/authorization.service';
 import {
   fieldVerificationCompletionService,
   type TransactionClient,
@@ -168,13 +169,19 @@ export class VerifiedLandInventoryService {
     }
 
     // Administrative scope enforcement
-    const inScope = await scopeService.isWithinAdministrativeScope(
-      userId,
-      inventory.acquisitionCase.project.administrativeUnitId
-    );
-    if (!inScope) {
+    const [inScope, inAgencyScope] = await Promise.all([
+      scopeService.isWithinAdministrativeScope(
+        userId,
+        inventory.acquisitionCase.project.administrativeUnitId
+      ),
+      authorizationService.canAccessProjectByAgency(
+        userId,
+        inventory.acquisitionCase.project.implementingAgencyId
+      ),
+    ]);
+    if (!inScope || !inAgencyScope) {
       throw new ForbiddenError(
-        'Forbidden: Verified land inventory is outside your authorized administrative scope'
+        'Forbidden: Verified land inventory is outside your authorized administrative or agency scope'
       );
     }
 
@@ -210,13 +217,19 @@ export class VerifiedLandInventoryService {
       return user;
     }
 
-    const inScope = await scopeService.isWithinAdministrativeScope(
-      userId,
-      inventory.acquisitionCase.project.administrativeUnitId
-    );
-    if (!inScope) {
+    const [inScope, inAgencyScope] = await Promise.all([
+      scopeService.isWithinAdministrativeScope(
+        userId,
+        inventory.acquisitionCase.project.administrativeUnitId
+      ),
+      authorizationService.canAccessProjectByAgency(
+        userId,
+        inventory.acquisitionCase.project.implementingAgencyId
+      ),
+    ]);
+    if (!inScope || !inAgencyScope) {
       throw new ForbiddenError(
-        'Forbidden: Verified land inventory is outside your authorized administrative scope'
+        'Forbidden: Verified land inventory is outside your authorized administrative or agency scope'
       );
     }
 
@@ -873,13 +886,13 @@ export class VerifiedLandInventoryService {
 
     const isSuper = await permissionService.isSuperAdmin(userId);
     if (!isSuper) {
-      const inScope = await scopeService.isWithinAdministrativeScope(
-        userId,
-        acqCase.project.administrativeUnitId
-      );
-      if (!inScope) {
+      const [inScope, inAgencyScope] = await Promise.all([
+        scopeService.isWithinAdministrativeScope(userId, acqCase.project.administrativeUnitId),
+        authorizationService.canAccessProjectByAgency(userId, acqCase.project.implementingAgencyId),
+      ]);
+      if (!inScope || !inAgencyScope) {
         throw new ForbiddenError(
-          'Forbidden: Acquisition case is outside your authorized administrative scope'
+          'Forbidden: Acquisition case is outside your authorized administrative or agency scope'
         );
       }
     }
@@ -940,8 +953,14 @@ export class VerifiedLandInventoryService {
       );
     }
 
-    const scopedUnitIds = await scopeService.getAllowedUnitIdsForUser(userId);
-    if (scopedUnitIds !== undefined && scopedUnitIds.length === 0) {
+    const [scopedUnitIds, agencyScope] = await Promise.all([
+      scopeService.getAllowedUnitIdsForUser(userId),
+      authorizationService.getAgencyScopeForUser(userId),
+    ]);
+    if (
+      (scopedUnitIds !== undefined && scopedUnitIds.length === 0) ||
+      agencyScope === null
+    ) {
       return {
         items: [],
         pagination: {
@@ -965,9 +984,14 @@ export class VerifiedLandInventoryService {
     const offset = (page - 1) * limit;
 
     const [summary, listResult] = await Promise.all([
-      verifiedLandInventoryRepository.getInventorySummaryMetrics(scopedUnitIds),
+      verifiedLandInventoryRepository.getInventorySummaryMetrics(
+        scopedUnitIds,
+        undefined,
+        agencyScope ?? undefined
+      ),
       verifiedLandInventoryRepository.listInventories({
         scopedUnitIds,
+        implementingAgencyId: agencyScope ?? undefined,
         status: options.status,
         search: options.search,
         limit,

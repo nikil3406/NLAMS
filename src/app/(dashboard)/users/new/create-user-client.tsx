@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import type { Role } from '../../../../../db/schema/roles';
 import type { AdministrativeUnit } from '../../../../../db/schema/administrative-units';
+import type { ImplementingAgency } from '../../../../../db/schema/implementing-agencies';
 import type { UserWithDetails } from '../../../../repositories/user.repository';
 
 interface CompetentAuthorityOption {
@@ -23,6 +24,7 @@ export function CreateUserClient() {
   const [roles, setRoles] = useState<Role[]>([]);
   const [units, setUnits] = useState<AdministrativeUnit[]>([]);
   const [competentAuthorities, setCompetentAuthorities] = useState<CompetentAuthorityOption[]>([]);
+  const [implementingAgencies, setImplementingAgencies] = useState<ImplementingAgency[]>([]);
   const [isLoadingMetadata, setIsLoadingMetadata] = useState(true);
 
   // Form State
@@ -32,6 +34,7 @@ export function CreateUserClient() {
   const [roleId, setRoleId] = useState('');
   const [unitId, setUnitId] = useState('');
   const [selectedAuthorityId, setSelectedAuthorityId] = useState('');
+  const [selectedAgencyId, setSelectedAgencyId] = useState('');
   const [customPassword, setCustomPassword] = useState('');
   const [autoGeneratePassword, setAutoGeneratePassword] = useState(true);
 
@@ -49,10 +52,11 @@ export function CreateUserClient() {
     async function fetchFormOptions() {
       setIsLoadingMetadata(true);
       try {
-        const [rolesRes, unitsRes, authsRes] = await Promise.all([
+        const [rolesRes, unitsRes, authsRes, agenciesRes] = await Promise.all([
           fetch('/api/roles'),
           fetch('/api/administrative-units'),
           fetch('/api/competent-authorities?status=ACTIVE&includeJurisdictions=true'),
+          fetch('/api/implementing-agencies?activeOnly=true&limit=100'),
         ]);
 
         if (rolesRes.ok) {
@@ -84,6 +88,13 @@ export function CreateUserClient() {
             }
           }
         }
+
+        if (agenciesRes.ok) {
+          const agenciesJson = await agenciesRes.json();
+          if (agenciesJson.success && Array.isArray(agenciesJson.data)) {
+            setImplementingAgencies(agenciesJson.data);
+          }
+        }
       } catch {
         setErrorMessage('Failed to load role, administrative unit, or authority choices.');
       } finally {
@@ -96,6 +107,7 @@ export function CreateUserClient() {
 
   const selectedRole = roles.find((r) => r.id === roleId);
   const isCompetentAuthorityRole = selectedRole?.name === 'COMPETENT_AUTHORITY';
+  const isProjectOfficerRole = selectedRole?.name === 'PROJECT_OFFICER';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -105,6 +117,10 @@ export function CreateUserClient() {
     try {
       if (isCompetentAuthorityRole && !selectedAuthorityId) {
         throw new Error('Please select a Competent Authority for this user.');
+      }
+
+      if (isProjectOfficerRole && !selectedAgencyId) {
+        throw new Error('Please select an Implementing Agency for this Project Officer.');
       }
 
       const payload: Record<string, unknown> = {
@@ -117,6 +133,10 @@ export function CreateUserClient() {
 
       if (isCompetentAuthorityRole) {
         payload.competentAuthorityId = selectedAuthorityId;
+      }
+
+      if (isProjectOfficerRole) {
+        payload.implementingAgencyId = selectedAgencyId;
       }
 
       if (!autoGeneratePassword && customPassword.trim()) {
@@ -396,6 +416,49 @@ export function CreateUserClient() {
                 </select>
                 <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                   Associates this user with the selected Competent Authority for acquisition proposal scrutiny and reviews. Only active authorities are selectable.
+                </span>
+              </div>
+            )}
+
+            {/* Conditional Implementing Agency Selection Field */}
+            {isProjectOfficerRole && (
+              <div
+                className="form-group"
+                style={{
+                  background: 'rgba(59, 130, 246, 0.06)',
+                  border: '1px solid rgba(59, 130, 246, 0.3)',
+                  borderRadius: '8px',
+                  padding: '1.25rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.5rem',
+                }}
+              >
+                <label
+                  className="form-label"
+                  htmlFor="user-implementing-agency"
+                  style={{ color: '#60a5fa', fontWeight: 600, fontSize: '0.875rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                >
+                  <span>🏢 Select Implementing Agency</span>
+                  <span style={{ color: 'var(--status-danger)' }}>*</span>
+                </label>
+                <select
+                  id="user-implementing-agency"
+                  className="search-input"
+                  style={{ paddingLeft: '1rem' }}
+                  required
+                  value={selectedAgencyId}
+                  onChange={(e) => setSelectedAgencyId(e.target.value)}
+                >
+                  <option value="">— Select an active Implementing Agency —</option>
+                  {implementingAgencies.map((agency) => (
+                    <option key={agency.id} value={agency.id}>
+                      {agency.name} ({agency.code}) — {agency.agencyType.replace(/_/g, ' ')}
+                    </option>
+                  ))}
+                </select>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                  Associates this Project Officer with an active Implementing Agency. Only active agencies are listed.
                 </span>
               </div>
             )}

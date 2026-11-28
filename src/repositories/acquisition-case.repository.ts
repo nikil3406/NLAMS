@@ -18,6 +18,7 @@ export interface AcquisitionCaseFilterOptions {
   search?: string;
   status?: AcquisitionCaseStatus | string;
   projectId?: string;
+  implementingAgencyId?: string;
   administrativeUnitIds?: string[];
   limit?: number;
   offset?: number;
@@ -260,6 +261,10 @@ export class AcquisitionCaseRepository {
       conditions.push(eq(acquisitionCases.projectId, options.projectId));
     }
 
+    if (options.implementingAgencyId) {
+      conditions.push(eq(projects.implementingAgencyId, options.implementingAgencyId));
+    }
+
     if (options.search?.trim()) {
       const term = `%${options.search.trim()}%`;
       conditions.push(
@@ -357,6 +362,10 @@ export class AcquisitionCaseRepository {
 
     if (options.projectId) {
       conditions.push(eq(acquisitionCases.projectId, options.projectId));
+    }
+
+    if (options.implementingAgencyId) {
+      conditions.push(eq(projects.implementingAgencyId, options.implementingAgencyId));
     }
 
     if (options.search?.trim()) {

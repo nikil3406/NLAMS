@@ -7,6 +7,7 @@ import {
 import { roleRepository } from '../../repositories/role.repository';
 import { administrativeUnitRepository } from '../../repositories/administrative-unit.repository';
 import { competentAuthorityRepository } from '../../repositories/competent-authority.repository';
+import { implementingAgencyRepository } from '../../repositories/implementing-agency.repository';
 import { permissionService } from '../authorization/permission.service';
 import { authorizationService } from '../authorization/authorization.service';
 import { scopeService } from '../authorization/scope.service';
@@ -236,6 +237,30 @@ export class UserService {
       competentAuthorityIdToAssign = authority.id;
     }
 
+    // 4c. Implementing Agency validation if assigning PROJECT_OFFICER role
+    let implementingAgencyIdToAssign: string | null = null;
+    if (role.name === 'PROJECT_OFFICER') {
+      if (!input.implementingAgencyId) {
+        throw new BadRequestError(
+          'Implementing Agency selection is required when creating a user with the PROJECT_OFFICER role'
+        );
+      }
+      const agency = await implementingAgencyRepository.findAgencyById(
+        input.implementingAgencyId
+      );
+      if (!agency) {
+        throw new BadRequestError(
+          `Selected Implementing Agency '${input.implementingAgencyId}' does not exist`
+        );
+      }
+      if (agency.status !== 'ACTIVE') {
+        throw new BadRequestError(
+          `Cannot link user to Implementing Agency '${agency.name}' (${agency.code}): agency is ${agency.status}`
+        );
+      }
+      implementingAgencyIdToAssign = agency.id;
+    }
+
     // 5. Password handling
     let initialPassword = input.password?.trim();
     let wasGenerated = false;
@@ -257,6 +282,7 @@ export class UserService {
       roleId: input.roleId,
       administrativeUnitId: input.administrativeUnitId,
       competentAuthorityId: competentAuthorityIdToAssign,
+      implementingAgencyId: implementingAgencyIdToAssign,
       assignedBy: actorUserId,
     });
 
@@ -517,6 +543,83 @@ export class UserService {
 
     const refreshed = await userRepository.findAuthorityAssignmentsByUserId(targetUserId);
     return refreshed.find((a) => a.id === assignmentId) ?? null;
+  }
+
+  /**
+   * Retrieves all Implementing Agency assignments (active and historical) for a target user.
+   */
+  async getUserImplementingAgencyAssignments(actorUserId: string, targetUserId: string) {
+    await permissionService.requirePermission(actorUserId, 'USER_VIEW');
+
+    const targetUser = await this.getUserDetails(actorUserId, targetUserId);
+    return targetUser.implementingAgencyAssignments ?? [];
+  }
+
+  /**
+   * Assigns or updates the Implementing Agency associated with a PROJECT_OFFICER user.
+   * Preserves historical records by deactivating previous active assignments.
+   * Prevents self-modification and enforces USER_ASSIGN + management authority.
+   */
+  async assignUserImplementingAgency(
+    actorUserId: string,
+    targetUserId: string,
+    input: {
+      implementingAgencyId: string;
+      effectiveFrom?: string;
+      effectiveUntil?: string | null;
+    }
+  ) {
+    if (actorUserId === targetUserId) {
+      throw new ForbiddenError(
+        'Forbidden: users cannot modify their own Implementing Agency association'
+      );
+    }
+
+    await permissionService.requirePermission(actorUserId, 'USER_ASSIGN');
+
+    const targetUser = await userRepository.findUserDetailsById(targetUserId);
+    if (!targetUser) {
+      throw new NotFoundError('Target user not found');
+    }
+
+    await authorizationService.requireCanManageUser(actorUserId, targetUserId, {
+      requiredPermission: 'USER_ASSIGN',
+    });
+
+    const hasProjectOfficerRole = targetUser.roles.some((r) => r.name === 'PROJECT_OFFICER');
+    if (!hasProjectOfficerRole) {
+      throw new BadRequestError(
+        'Cannot assign Implementing Agency: user does not hold the PROJECT_OFFICER role'
+      );
+    }
+
+    const agency = await implementingAgencyRepository.findAgencyById(
+      input.implementingAgencyId
+    );
+    if (!agency) {
+      throw new BadRequestError(
+        `Implementing Agency '${input.implementingAgencyId}' does not exist`
+      );
+    }
+    if (agency.status !== 'ACTIVE') {
+      throw new BadRequestError(
+        `Cannot assign user to Implementing Agency '${agency.name}' (${agency.code}): agency is ${agency.status}`
+      );
+    }
+
+    const assignment = await userRepository.reassignUserImplementingAgency(
+      targetUserId,
+      agency.id,
+      actorUserId,
+      input.effectiveFrom,
+      input.effectiveUntil
+    );
+
+    console.info(
+      `[AUDIT] Implementing Agency assignment: userId=${targetUserId}, agencyId=${agency.id} (${agency.code}), assignedBy=${actorUserId}`
+    );
+
+    return assignment;
   }
 }
 

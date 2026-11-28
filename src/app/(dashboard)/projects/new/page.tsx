@@ -24,5 +24,10 @@ export default async function CreateProjectPage() {
     redirect('/projects');
   }
 
-  return <CreateProjectClient />;
+  return (
+    <CreateProjectClient
+      userRoles={authContext?.roles ?? []}
+      userImplementingAgency={authContext?.implementingAgency ?? null}
+    />
+  );
 }

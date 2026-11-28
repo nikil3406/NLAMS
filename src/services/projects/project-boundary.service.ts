@@ -6,6 +6,7 @@ import {
 import { projectRepository } from '../../repositories/project.repository';
 import { permissionService } from '../authorization/permission.service';
 import { scopeService } from '../authorization/scope.service';
+import { authorizationService } from '../authorization/authorization.service';
 import type { ProjectBoundaryInput, GeoJsonGeometry } from '../../validators/spatial/boundary.schema';
 import { BadRequestError, NotFoundError, ForbiddenError } from '../../types';
 
@@ -130,11 +131,11 @@ export class ProjectBoundaryService {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
 
-    const inScope = await scopeService.isWithinAdministrativeScope(
-      userId,
-      project.administrativeUnitId
-    );
-    if (!inScope) {
+    const [inScope, inAgencyScope] = await Promise.all([
+      scopeService.isWithinAdministrativeScope(userId, project.administrativeUnitId),
+      authorizationService.canAccessProjectByAgency(userId, project.implementingAgencyId),
+    ]);
+    if (!inScope || !inAgencyScope) {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
 
@@ -155,11 +156,11 @@ export class ProjectBoundaryService {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
 
-    const inScope = await scopeService.isWithinAdministrativeScope(
-      userId,
-      project.administrativeUnitId
-    );
-    if (!inScope) {
+    const [inScope, inAgencyScope] = await Promise.all([
+      scopeService.isWithinAdministrativeScope(userId, project.administrativeUnitId),
+      authorizationService.canAccessProjectByAgency(userId, project.implementingAgencyId),
+    ]);
+    if (!inScope || !inAgencyScope) {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
 

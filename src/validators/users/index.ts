@@ -6,4 +6,5 @@ export * from './update-assignment.schema';
 export * from './list-users.schema';
 export * from './update-self-profile.schema';
 export * from './authority-assignment.schema';
+export * from './implementing-agency-assignment.schema';
 

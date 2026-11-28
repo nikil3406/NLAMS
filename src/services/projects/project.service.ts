@@ -11,8 +11,10 @@ import {
 } from '../../repositories/project-boundary.repository';
 import { projectBoundaryService } from './project-boundary.service';
 import { implementingAgencyService } from '../implementing-agencies/implementing-agency.service';
+import { authorizationService } from '../authorization/authorization.service';
 import { permissionService } from '../authorization/permission.service';
 import { scopeService } from '../authorization/scope.service';
+import { userRepository } from '../../repositories/user.repository';
 import { administrativeUnitRepository } from '../../repositories/administrative-unit.repository';
 import type {
   CreateProjectInput,
@@ -80,8 +82,27 @@ export class ProjectService {
     // 2. Administrative scope check
     await scopeService.requireAdministrativeScope(userId, input.administrativeUnitId);
 
-    // 3. Implementing Agency check
-    await implementingAgencyService.validateActiveAgency(input.implementingAgencyId);
+    // 3. Implementing Agency resolution & validation
+    let resolvedImplementingAgencyId: string;
+    const isMinistryOrSuper = isSuper || creatorRoles.includes('MINISTRY_ADMIN');
+    if (!isMinistryOrSuper && creatorRoles.includes('PROJECT_OFFICER')) {
+      const userAgency = await authorizationService.requireProjectOfficerActiveAgency(userId);
+      if (input.implementingAgencyId && input.implementingAgencyId !== userAgency.id) {
+        console.warn(
+          `[AUDIT] Blocked Project Officer (${userId}) attempt to override Implementing Agency: supplied=${input.implementingAgencyId}, assigned=${userAgency.id}`
+        );
+        throw new ForbiddenError(
+          'Forbidden: Project Officers cannot select or override their Implementing Agency'
+        );
+      }
+      resolvedImplementingAgencyId = userAgency.id;
+    } else {
+      if (!input.implementingAgencyId) {
+        throw new BadRequestError('Implementing agency is required');
+      }
+      await implementingAgencyService.validateActiveAgency(input.implementingAgencyId);
+      resolvedImplementingAgencyId = input.implementingAgencyId;
+    }
 
     // 4. Verify administrative unit exists and is active
     const adminUnit = await administrativeUnitRepository.findUnitById(input.administrativeUnitId);
@@ -109,7 +130,7 @@ export class ProjectService {
           name: input.name,
           description: input.description ?? null,
           projectType: input.projectType,
-          implementingAgencyId: input.implementingAgencyId,
+          implementingAgencyId: resolvedImplementingAgencyId,
           administrativeUnitId: input.administrativeUnitId,
           createdBy: userId,
           landAcquisitionRequired: input.landAcquisitionRequired ?? true,
@@ -145,6 +166,10 @@ export class ProjectService {
       throw new Error('Project created but failed to retrieve record');
     }
 
+    console.info(
+      `[AUDIT] Project created: projectId=${created.id}, projectCode=${created.projectCode}, implementingAgencyId=${resolvedImplementingAgencyId}, createdBy=${userId}`
+    );
+
     return detailed;
   }
 
@@ -158,7 +183,29 @@ export class ProjectService {
     // 1. Permission check
     await permissionService.requirePermission(userId, 'PROJECT_VIEW');
 
-    const allowedUnits = await scopeService.getAllowedUnitIdsForUser(userId);
+    const [allowedUnits, agencyScope] = await Promise.all([
+      scopeService.getAllowedUnitIdsForUser(userId),
+      authorizationService.getAgencyScopeForUser(userId),
+    ]);
+
+    if (agencyScope === null) {
+      return {
+        data: [],
+        pagination: { total: 0, page: query.page, limit: query.limit, totalPages: 0 },
+      };
+    }
+
+    let effectiveAgencyId = query.implementingAgencyId;
+    if (agencyScope !== undefined) {
+      if (query.implementingAgencyId && query.implementingAgencyId !== agencyScope) {
+        return {
+          data: [],
+          pagination: { total: 0, page: query.page, limit: query.limit, totalPages: 0 },
+        };
+      }
+      effectiveAgencyId = agencyScope;
+    }
+
     let allowedUnitIds: string[] | undefined;
 
     if (allowedUnits !== undefined) {
@@ -191,7 +238,7 @@ export class ProjectService {
       search: query.search,
       status: query.status,
       projectType: query.projectType,
-      implementingAgencyId: query.implementingAgencyId,
+      implementingAgencyId: effectiveAgencyId,
       administrativeUnitIds: allowedUnitIds,
       landAcquisitionRequired: query.landAcquisitionRequired,
       hasAcquisitionCase: query.hasAcquisitionCase,
@@ -233,12 +280,12 @@ export class ProjectService {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
 
-    // 2. Administrative scope check (404 to avoid leaking existence of out-of-scope project)
-    const inScope = await scopeService.isWithinAdministrativeScope(
-      userId,
-      project.administrativeUnitId
-    );
-    if (!inScope) {
+    // 2. Administrative scope & organization-scope check (404 to avoid leaking existence of out-of-scope project)
+    const [inScope, inAgencyScope] = await Promise.all([
+      scopeService.isWithinAdministrativeScope(userId, project.administrativeUnitId),
+      authorizationService.canAccessProjectByAgency(userId, project.implementingAgencyId),
+    ]);
+    if (!inScope || !inAgencyScope) {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
 
@@ -265,12 +312,12 @@ export class ProjectService {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
 
-    // 2. Administrative scope check on existing project
-    const inScope = await scopeService.isWithinAdministrativeScope(
-      userId,
-      project.administrativeUnitId
-    );
-    if (!inScope) {
+    // 2. Administrative scope & organization-scope check on existing project
+    const [inScope, inAgencyScope] = await Promise.all([
+      scopeService.isWithinAdministrativeScope(userId, project.administrativeUnitId),
+      authorizationService.canAccessProjectByAgency(userId, project.implementingAgencyId),
+    ]);
+    if (!inScope || !inAgencyScope) {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
 
@@ -310,9 +357,11 @@ export class ProjectService {
       }
     }
 
-    // 5. If implementingAgencyId is changed, verify it exists and is active
+    // 5. Implementing Agency reassignment is not permitted through ordinary project editing
     if (input.implementingAgencyId && input.implementingAgencyId !== project.implementingAgencyId) {
-      await implementingAgencyService.validateActiveAgency(input.implementingAgencyId);
+      throw new ForbiddenError(
+        'Forbidden: Implementing Agency cannot be reassigned through ordinary project editing'
+      );
     }
 
     // 6. Pre-validate and measure geometry if boundary is provided
@@ -387,11 +436,11 @@ export class ProjectService {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
 
-    const inScope = await scopeService.isWithinAdministrativeScope(
-      userId,
-      project.administrativeUnitId
-    );
-    if (!inScope) {
+    const [inScope, inAgencyScope] = await Promise.all([
+      scopeService.isWithinAdministrativeScope(userId, project.administrativeUnitId),
+      authorizationService.canAccessProjectByAgency(userId, project.implementingAgencyId),
+    ]);
+    if (!inScope || !inAgencyScope) {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
 
@@ -432,11 +481,11 @@ export class ProjectService {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
 
-    const inScope = await scopeService.isWithinAdministrativeScope(
-      userId,
-      project.administrativeUnitId
-    );
-    if (!inScope) {
+    const [inScope, inAgencyScope] = await Promise.all([
+      scopeService.isWithinAdministrativeScope(userId, project.administrativeUnitId),
+      authorizationService.canAccessProjectByAgency(userId, project.implementingAgencyId),
+    ]);
+    if (!inScope || !inAgencyScope) {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
 
@@ -518,11 +567,11 @@ export class ProjectService {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
 
-    const inScope = await scopeService.isWithinAdministrativeScope(
-      userId,
-      project.administrativeUnitId
-    );
-    if (!inScope) {
+    const [inScope, inAgencyScope] = await Promise.all([
+      scopeService.isWithinAdministrativeScope(userId, project.administrativeUnitId),
+      authorizationService.canAccessProjectByAgency(userId, project.implementingAgencyId),
+    ]);
+    if (!inScope || !inAgencyScope) {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
 
@@ -571,8 +620,15 @@ export class ProjectService {
     input: ReviewProjectInput,
     userId: string
   ): Promise<ProjectWithRelations> {
-    // 1. Permission check
+    // 1. Permission & active user check
     await permissionService.requirePermission(userId, 'PROJECT_VIEW');
+
+    const reviewer = await userRepository.findUserById(userId);
+    if (!reviewer || reviewer.status !== 'ACTIVE') {
+      throw new ForbiddenError(
+        'Forbidden: Only active users may review projects'
+      );
+    }
 
     // 2. Validate project exists
     const project = await projectRepository.findProjectById(projectId);
@@ -598,7 +654,7 @@ export class ProjectService {
       );
     }
 
-    // 5. Counterpart-role enforcement
+    // 5. Counterpart-role & Implementing Agency enforcement
     const projectCreatorRoles = await permissionService.getUserRoles(project.createdBy);
     const reviewerRoles = await permissionService.getUserRoles(userId);
 
@@ -617,6 +673,19 @@ export class ProjectService {
           `so the reviewer must hold the '${requiredCounterpartRole}' role. ` +
           `Your current roles do not include '${requiredCounterpartRole}'.`
         );
+      }
+
+      // If Ministry-created project is reviewed by PROJECT_OFFICER, enforce matching active Implementing Agency
+      if (requiredCounterpartRole === 'PROJECT_OFFICER') {
+        const reviewerAgency = await authorizationService.requireProjectOfficerActiveAgency(userId);
+        if (reviewerAgency.id !== project.implementingAgencyId) {
+          console.warn(
+            `[AUDIT] Blocked cross-agency project review: projectId=${projectId}, projectAgency=${project.implementingAgencyId}, reviewerId=${userId}, reviewerAgency=${reviewerAgency.id}`
+          );
+          throw new ForbiddenError(
+            `Forbidden: Only an active Project Officer belonging to the project's Implementing Agency (${project.implementingAgency.code}) may review this project`
+          );
+        }
       }
     }
 
